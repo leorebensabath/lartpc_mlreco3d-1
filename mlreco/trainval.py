@@ -9,7 +9,6 @@ from mlreco.utils.data_parallel import DataParallel
 import numpy as np
 import re
 
-
 class trainval(object):
     """
     Groups all relevant functions for forward/backward of a network.
@@ -89,11 +88,12 @@ class trainval(object):
         # Keys of format %s_count are special and used as counters
         # e.g. for PPN when there are no particle labels in event
         for key in res_combined:
-            if ('analysis_keys' not in self._model_config or key not in self._model_config['analysis_keys']):
-                if "count" not in key:
-                    res_combined[key] = np.array(res_combined[key]).mean()
-                else:
-                    res_combined[key] = np.array(res_combined[key]).sum()
+            if "_count" not in key:
+                if ('analysis_keys' not in self._model_config or key not in self._model_config['analysis_keys']):
+                    if key + "_count" not in res_combined:
+                        res_combined[key] = np.array(res_combined[key]).sum() / self._batch_size
+                    else:
+                        res_combined[key] = np.array(res_combined[key]).sum() / res_combined[key + '_count']
         return res_combined
 
     def _forward(self, data_blob):
@@ -111,7 +111,10 @@ class trainval(object):
             # Segmentation
             # FIXME set requires_grad = false for labels/weights?
             for key in data_blob:
-                data_blob[key] = [torch.as_tensor(d).cuda() if len(self._gpus) else torch.as_tensor(d) for d in data_blob[key]]
+                if isinstance(data_blob[key][0], list):
+                    data_blob[key] = [[torch.as_tensor(d).cuda() if len(self._gpus) else torch.as_tensor(d) for d in scale] for scale in data_blob[key]]
+                else:
+                    data_blob[key] = [torch.as_tensor(d).cuda() if len(self._gpus) else torch.as_tensor(d) for d in data_blob[key]]
             data = []
             for i in range(max(1,len(self._gpus))):
                 data.append([data_blob[key][i] for key in input_keys])
@@ -122,14 +125,12 @@ class trainval(object):
 
             result = self._net(data)
 
-
             if not torch.cuda.is_available():
                 data = [data]
 
             # Compute the loss
             if loss_keys:
                 loss_acc = self._criterion(result, *tuple([data_blob[key] for key in loss_keys]))
-
                 if self._train:
                     self._loss.append(loss_acc['loss'])
 
@@ -139,11 +140,17 @@ class trainval(object):
             # Record results
             res = {}
             for label in loss_acc:
-                res[label] = [loss_acc[label].cpu().item() if isinstance(loss_acc[label], torch.Tensor) else loss_acc[label]]
+                res[label] = [loss_acc[label].cpu().item() if not isinstance(loss_acc[label], float) else loss_acc[label]]
             # Use analysis keys to also get tensors
             if 'analysis_keys' in self._model_config:
                 for key in self._model_config['analysis_keys']:
-                    res[key] = [s.cpu().detach().numpy() for s in result[self._model_config['analysis_keys'][key]]]
+                    key_result = result[self._model_config['analysis_keys'][key]]
+                    import sparseconvnet as scn
+                    # Record feature maps
+                    if isinstance(key_result[0], list) and isinstance(key_result[0][0], scn.SparseConvNetTensor):
+                        res[key] = [[torch.cat([s.get_spatial_locations().float(), s.features.cpu()], dim=1).detach().numpy() for s in layer] for layer in key_result]
+                    else:
+                        res[key] = [s.cpu().detach().numpy() for s in key_result]
             return res
 
     def initialize(self):

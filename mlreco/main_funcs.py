@@ -45,8 +45,7 @@ def inference(cfg):
 def process_config(cfg):
     # Set GPUS to be used
     os.environ['CUDA_VISIBLE_DEVICES'] = cfg['training']['gpus']
-    #cfg['training']['gpus'] = list(range(len([int(a) for a in cfg['training']['gpus'].split(',') if a.isdigit()])))
-    cfg['training']['gpus'] = [int(i) for i in cfg['training']['gpus'].split(',')]
+    cfg['training']['gpus'] = list(range(len([int(a) for a in cfg['training']['gpus'].split(',') if a.isdigit()])))
     # Update seed
     if cfg['training']['seed'] < 0:
         import time
@@ -228,12 +227,12 @@ def train_loop(cfg, handlers):
 
         tio_start = time.time()
         data_blob = get_data_minibatched(handlers.data_io_iter, cfg)
-        print(data_blob['index'])
         tspent_io = time.time() - tio_start
         tsum_io += tspent_io
 
         # Train step
         res = handlers.trainer.train_step(data_blob)
+        #handlers.trainer._scheduler.step(res['loss'])
         # Save snapshot
         if checkpt_step:
             handlers.trainer.save_state(handlers.iteration)

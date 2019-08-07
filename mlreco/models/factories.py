@@ -9,7 +9,9 @@ def model_dict():
     from . import edge_gnn
     from . import iter_edge_gnn
     from . import chain_gnn
-    
+    from . import discriminative_loss
+    from . import discriminative_multiLayerLoss
+    from . import uresnet_clustering
     
     # Make some models available (not all of them, e.g. PPN is not standalone)
     models = {
@@ -27,7 +29,13 @@ def model_dict():
         # Edge Model
         "edge_model": (edge_gnn.EdgeModel, edge_gnn.EdgeChannelLoss),
         # Iterative Edge Model
-        "iter_edge_model": (iter_edge_gnn.IterativeEdgeModel, iter_edge_gnn.IterEdgeLabelLoss)
+        "iter_edge_model": (iter_edge_gnn.IterativeEdgeModel, iter_edge_gnn.IterEdgeLabelLoss),
+        # Discriminative Loss (Loss at Output)
+        "discriminative_loss": (discriminative_loss.UResNet, discriminative_loss.DiscriminativeLoss),
+        # Discriminative MultiLayer Loss (Loss at Decoding Layers)
+        "discriminative_multiLayerLoss": (discriminative_multiLayerLoss.UResNet, discriminative_multiLayerLoss.DiscriminativeLoss),
+        # Uresnet Clustering
+        "uresnet_clustering": (uresnet_clustering.UResNet, uresnet_clustering.DiscriminativeLoss)
     }
     # "chain_gnn": (chain_gnn.Chain, chain_gnn.ChainLoss)
     return models
