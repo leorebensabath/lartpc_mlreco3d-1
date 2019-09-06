@@ -15,6 +15,13 @@ def model_dict():
     from . import cluster_dir_gnn
     from . import uresnet_clustering
 
+    from . import discriminative_loss
+    from . import discriminative_multiLayerLoss
+    from . import uresnet_clustering_alt
+    from . import uresnet_clustering_v2
+    from . import uresnet_clustering_v2_decoder_separate
+    from . import uresnet_clustering_density
+
     # Make some models available (not all of them, e.g. PPN is not standalone)
     models = {
         # Regular UResNet + PPN
@@ -42,6 +49,18 @@ def model_dict():
         "clust_edge_model": (cluster_edge_gnn.EdgeModel, cluster_edge_gnn.EdgeChannelLoss),
         # direction model
         "clust_dir_model": (cluster_dir_gnn.EdgeModel, cluster_dir_gnn.EdgeChannelLoss),
+        # Discriminative Loss
+        "discriminative_loss": (discriminative_loss.UResNet, discriminative_loss.DiscriminativeLoss),
+        # Discriminative MultiLayer Loss (Loss at Decoding Layers)
+        "discriminative_multiLayerLoss": (discriminative_multiLayerLoss.UResNet, discriminative_multiLayerLoss.DiscriminativeLoss),
+        # Uresnet Clustering
+        "uresnet_clustering_alt": (uresnet_clustering_alt.UResNet, uresnet_clustering_alt.DiscriminativeLoss),
+        # Uresnet Clustering V2
+        "uresnet_clustering_v2": (uresnet_clustering_v2.UResNet, uresnet_clustering_v2.ClusteringLoss),
+        # Uresnet Clustering V2, with Two Decoders
+        "uresnet_clustering_v2_decoder_separate": (uresnet_clustering_v2_decoder_separate.UResNet, uresnet_clustering_v2_decoder_separate.ClusteringLoss),
+        # Uresnet Clustering Density
+        "uresnet_clustering_density": (uresnet_clustering_density.ClusterNet_Density, uresnet_clustering_density.DensityLoss)
     }
     # "chain_gnn": (chain_gnn.Chain, chain_gnn.ChainLoss)
     return models
