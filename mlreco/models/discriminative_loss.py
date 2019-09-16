@@ -19,12 +19,15 @@ class UResNet(torch.nn.Module):
         super(UResNet, self).__init__()
         model_config = cfg['modules']['discriminative_loss']
         dimension = model_config['data_dim']
+        self.spatial_size = model_config['spatial_size']
         reps = 2  # Conv block repetition factor
         kernel_size = 2  # Use input_spatial_size method for other values?
         m = model_config['filters']  # Unet number of features
         nPlanes = [i * m for i in range(1, model_config['num_strides'] + 1)]
         nInputFeatures = 1
         self._offset = model_config.get('offset', False)
+        if self._offset:
+            nInputFeatures += 3
         self.sparseModel = scn.Sequential().add(
             scn.InputLayer(dimension, model_config['spatial_size'], mode=3)).add(
             scn.SubmanifoldConvolution(dimension, nInputFeatures, m, 3,False)).add(
@@ -34,7 +37,7 @@ class UResNet(torch.nn.Module):
                    # downsample = [filter size, filter stride]
             scn.BatchNormReLU(m)).add(scn.OutputLayer(dimension))
         if self._offset:
-            self.linear = torch.nn.Linear(m+3, model_config['num_classes'])
+            self.linear = torch.nn.Linear(m, model_config['num_classes'])
         else:
             self.linear = torch.nn.Linear(m, model_config['num_classes'])
 
@@ -46,11 +49,11 @@ class UResNet(torch.nn.Module):
         """
         #print(input)
         point_cloud, = input
-        coords = point_cloud[:, :-1].float()
+        coords = point_cloud[:, :-2].float()
+        normalized_coords = (coords - self.spatial_size / 2) / float(self.spatial_size / 2)
         features = point_cloud[:, -1][:, None].float()
         if self._offset:
-            features = torch.cat([coords, features], dim=1)
-            print(features)
+            features = torch.cat([normalized_coords, features], dim=1)
             emb = self.sparseModel((coords, features))
         else:
             emb = self.sparseModel((coords, features))
@@ -214,7 +217,7 @@ class DiscriminativeLoss(torch.nn.Module):
         loss = self._cfg['alpha'] * loss_var + self._cfg[
             'beta'] * loss_dist + self._cfg['gamma'] * loss_reg
         if verbose:
-            return [loss, loss_var, loss_dist, loss_reg]
+            return [loss, float(loss_var), float(loss_dist), float(loss_reg)]
         else:
             return [loss]
 
@@ -273,9 +276,11 @@ class DiscriminativeLoss(torch.nn.Module):
         clabels = group_labels[0][:, 4]
         batch_idx = semantic_labels[0][:, 3]
         embedding = out[1][0]
+        #print(out)
         #print(embedding)
         loss = defaultdict(list)
         accuracy = defaultdict(list)
+        nbatch = int(batch_idx.unique().shape[0])
         # Loop over each minibatch instance event
         for bidx in batch_idx.unique(sorted=True):
             embedding_batch = embedding[batch_idx == bidx]
@@ -301,20 +306,22 @@ class DiscriminativeLoss(torch.nn.Module):
                 # DEPRECATED
                 loss["total_loss"].append(self.combine(embedding_batch, clabels_batch))
                 acc, _ = self.acc_DUResNet(embedding_batch, clabels_batch)
-                accuracy.append(torch.as_tensor(acc))
+                accuracy.append(acc)
 
         total_loss = sum(loss["total_loss"])
         var_loss = sum(loss["var_loss"])
         dist_loss = sum(loss["dist_loss"])
         reg_loss = sum(loss["reg_loss"])
         acc_segs = defaultdict(float)
-        acc_avg = 0.0
+        acc_avg = []
         for i in range(5):
             if accuracy[i]:
                 acc_segs[i] = sum(accuracy[i]) / float(len(accuracy[i]))
+                acc_avg.append(acc_segs[i])
             else:
                 acc_segs[i] = 0.0
-            acc_avg += acc_segs[i]
+        acc_avg = sum(acc_avg) / float(len(acc_avg)) * nbatch
+
 
         return {
             "loss": total_loss,

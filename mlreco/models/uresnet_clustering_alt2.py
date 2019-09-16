@@ -4,8 +4,9 @@ import numpy as np
 import torch.nn.functional as F
 import torch.optim as optim
 import sparseconvnet as scn
-from collections import defaultdict, Counter
+from collections import defaultdict
 
+# URESNET CLUSTERING AS OF FRI 00:59
 
 class UResNet(torch.nn.Module):
     """
@@ -50,13 +51,12 @@ class UResNet(torch.nn.Module):
     - if `ghost`, segmentation scores for deghosting (N, 2)
     """
 
-    def __init__(self, cfg, name="uresnet_lonely"):
+    def __init__(self, cfg, name="uresnet_clustering"):
         super(UResNet, self).__init__()
         import sparseconvnet as scn
         self._model_config = cfg['modules'][name]
 
         # Whether to compute ghost mask separately or not
-        self._ghost = self._model_config.get('ghost', False)
         self._dimension = self._model_config.get('data_dim', 3)
         reps = self._model_config.get('reps', 2)  # Conv block repetition factor
         kernel_size = self._model_config.get('kernel_size', 2)
@@ -68,6 +68,7 @@ class UResNet(torch.nn.Module):
         self._N = self._model_config.get('N', 0)
         self._use_gpu = self._model_config.get('use_gpu', False)
         self._coordConv = self._model_config.get('coordConv', False)
+        self._hypDim = self._model_config.get('hypDim', 16)
 
         nPlanes = [i*m for i in range(1, num_strides+1)]  # UNet number of features per level
         downsample = [kernel_size, 2]  # [filter size, filter stride]
@@ -84,11 +85,19 @@ class UResNet(torch.nn.Module):
                     .add(scn.SubmanifoldConvolution(self._dimension, b, b, 3, False)))
              ).add(scn.AddTable())
 
+        def block_var(m, a, b):  # Normal Conv-BN Layer Style Blocks
+            m.add(scn.Sequential()
+                .add(scn.BatchNormLeakyReLU(a, leakiness=leakiness))
+                .add(scn.SubmanifoldConvolution(self._dimension, a, b, 3, False))
+                .add(scn.BatchNormLeakyReLU(b, leakiness=leakiness))
+                .add(scn.SubmanifoldConvolution(self._dimension, b, b, 3, False))
+            )
+
         self.input = scn.Sequential().add(
            scn.InputLayer(self._dimension, self.spatial_size, mode=3)).add(
            scn.SubmanifoldConvolution(self._dimension, nInputFeatures, m, 3, False)) # Kernel size 3, no bias
         self.concat = scn.JoinTable()
-        
+
         # Encoding
         self.bn = scn.BatchNormLeakyReLU(nPlanes[0], leakiness=leakiness)
         self.encoding_block = scn.Sequential()
@@ -112,7 +121,7 @@ class UResNet(torch.nn.Module):
         self.decoding_conv, self.decoding_blocks = scn.Sequential(), scn.Sequential()
         # Upsampling Transpose Convolutions for Embeddings
         self.embedding_upsampling = scn.Sequential()
-        
+
         if self._N > 0:
             for i in range(num_strides-2, -1, -1):
                 module1 = scn.Sequential().add(
@@ -145,8 +154,17 @@ class UResNet(torch.nn.Module):
            scn.BatchNormReLU(m)).add(
            scn.OutputLayer(self._dimension))
 
-        self.linear = torch.nn.Linear(m, num_classes)
-
+        self.seg_linear = torch.nn.Linear(m, num_classes)
+        # if self._coordConv:
+        #     module = scn.Sequential()
+        #     module.add(
+        #         scn.SubmanifoldConvolution(self._dimension, m+3, self._hypDim, 1, False)
+        #     )
+        #     self.emb_linear = module
+        # else:
+        #     module = scn.Sequential()
+        #     module.add(scn.SubmanifoldConvolution(self._dimension, m, self._hypDim, 1, False))
+        #     self.emb_linear = module
         # N Convolutions
         if self._N > 0:
             self.nConvs = scn.Sequential()
@@ -155,13 +173,13 @@ class UResNet(torch.nn.Module):
                 for _ in range(self._N):
                     block(module3, fDim, fDim)
                 self.nConvs.add(module3)
-        if self._coordConv:
-            module = scn.Sequential()
-            for _ in range(self._N):
-                # 3 is for three (x,y,z) coordinates
-                block(module, nPlanes[0] + 3, nPlanes[0] + 3)
-            self.nConvs[-1] = module
-        
+        # if self._coordConv:
+        #     module = scn.Sequential()
+        #     for _ in range(self._N):
+        #         # 3 is for three (x,y,z) coordinates
+        #         block(module, nPlanes[0] + 3, nPlanes[0] + 3)
+        #     self.nConvs[-1] = module
+
 
     def forward(self, input):
         """
@@ -174,7 +192,7 @@ class UResNet(torch.nn.Module):
         coords = point_cloud[:, 0:self._dimension+1].float()
         features = point_cloud[:, self._dimension+1:self._dimension+2].float()
         if self._coordConv:
-            normalized_coords = (coords[:, 0:3] - self.spatial_size /2) / float(self.spatial_size / 2)
+            normalized_coords = (coords[:, 0:3] - self.spatial_size /2) / float(self.spatial_size)
             coord_inputLayer = scn.InputLayer(self._dimension, self.spatial_size, mode=3)
             normalized_coords = coord_inputLayer((coords, normalized_coords))
 
@@ -182,24 +200,16 @@ class UResNet(torch.nn.Module):
 
         # Embeddings at each layer
         feature_maps = [x]
-        
+
         # Loop over Encoding Blocks to make downsampled segmentation/clustering masks.
         for i, layer in enumerate(self.encoding_block):
-            #print("{0}, 1 = {1}".format(i, x))
-            #print("Test = ", (x.features == x.features).all().item())
             x = self.encoding_block[i](x)
-            #print(self.encoding_block[i])
-            #print("{0}, 2 = {1}".format(i, x))
-            #print("Test = ", (x.features == x.features).all().item())
             feature_maps.append(x)
             x = self.encoding_conv[i](x)
-            #print(self.encoding_conv[i])
-            #print("{0}, 3 = {1}".format(i, x))
-            #print("Test = ", (x.features == x.features).all().item())
             # Downsampled coordinates and feature map
         # U-ResNet decoding
         embedding = []
-        
+
         for i, layer in enumerate(self.decoding_conv):
             if self._N > 0:
                 x_emb = self.nConvs[i](x)   # Embedding space after N Convolutions
@@ -215,9 +225,12 @@ class UResNet(torch.nn.Module):
                 x_non = layer(x)
                 x = self.concat([encoding_block, x_non])
                 x = self.decoding_blocks[i](x)
-        
+
+        seg_coords = x.get_spatial_locations().detach().cpu().numpy()
+        perm = np.lexsort((seg_coords[:, 2], seg_coords[:, 1], seg_coords[:, 0], seg_coords[:, 3]))
         x_seg = self.output(x)
-        x_seg = self.linear(x_seg)  # Output of UResNet
+        x_seg = x_seg[perm]
+        x_seg = self.seg_linear(x_seg)  # Output of UResNet
         if self._N > 0:
             if self._coordConv:
                 x = self.concat([x, normalized_coords])
@@ -229,15 +242,16 @@ class UResNet(torch.nn.Module):
         else:
             x_emb = x
             embedding.append(x_emb)
+        # Reverse Sort <embedding> for consistency with scaled labels
+        embedding = embedding[::-1]
+        # embedding[0] = self.emb_linear(embedding[0])
 
-        #for i, mask in enumerate(cluster_masks):
-        #    mask_numpy = mask.cpu().numpy()
-        #    np.savetxt('downsampled_{}.csv'.format(i),
-        #   mask_numpy, delimiter=',')
+        res = {
+            'segmentation': [x_seg],
+            'embedding': [embedding]
+        }
 
-        return [[x_seg],
-                [embedding]]
-        
+        return res
 
 class DiscriminativeLoss(torch.nn.Module):
     '''
@@ -249,7 +263,7 @@ class DiscriminativeLoss(torch.nn.Module):
 
     def __init__(self, cfg, reduction='sum'):
         super(DiscriminativeLoss, self).__init__()
-        self._cfg = cfg['modules']['discriminative_multiLayerLoss']
+        self._cfg = cfg['modules']['discriminative_loss']
         self.cross_entropy = torch.nn.CrossEntropyLoss(reduction='none')
         self.log_softmax = torch.nn.LogSoftmax(dim=1)
 
@@ -260,7 +274,6 @@ class DiscriminativeLoss(torch.nn.Module):
         self.gamma = self._cfg.get('gamma', 0.001)
         self.norm = self._cfg.get('norm', 2)
         self.seg_weight = self._cfg.get('seg_weight', 1.0)
-        self._use_gpu = self._cfg.get('use_gpu', False)
 
     def find_cluster_means(self, features, labels):
         '''
@@ -279,8 +292,7 @@ class DiscriminativeLoss(torch.nn.Module):
         clabels = labels.unique(sorted=True)
         cluster_means = []
         for c in clabels:
-            index = (labels == c)
-            mu_c = features[index].mean(0)
+            mu_c = features[labels == c].mean(0)
             cluster_means.append(mu_c)
         cluster_means = torch.stack(cluster_means)
         return cluster_means
@@ -293,7 +305,7 @@ class DiscriminativeLoss(torch.nn.Module):
             labels (torch.Tensor): ground truth instance labels
             cluster_means (torch.Tensor): output from find_cluster_means
             margin (float/int): constant used to specify delta_v in paper. Think of it
-            as the size of each clusters in embedding space. 
+            as the size of each clusters in embedding space.
         Returns:
             var_loss: (float) variance loss (see paper).
         '''
@@ -301,8 +313,7 @@ class DiscriminativeLoss(torch.nn.Module):
         n_clusters = len(cluster_means)
         cluster_labels = labels.unique(sorted=True)
         for i, c in enumerate(cluster_labels):
-            index = (labels == c)
-            dists = torch.norm(features[index] - cluster_means[i],
+            dists = torch.norm(features[labels == c] - cluster_means[i],
                                p=self._cfg['norm'],
                                dim=1)
             hinge = torch.clamp(dists - margin, min=0)
@@ -336,7 +347,7 @@ class DiscriminativeLoss(torch.nn.Module):
                         dist = torch.norm(c1 - c2, p=self._cfg['norm'])
                         hinge = torch.clamp(2.0 * margin - dist, min=0)
                         dist_loss += torch.pow(hinge, 2)
-                        
+
             dist_loss /= float((n_clusters - 1) * n_clusters)
             return dist_loss
 
@@ -351,7 +362,6 @@ class DiscriminativeLoss(torch.nn.Module):
         reg_loss = 0.0
         n_clusters, feature_dim = cluster_means.shape
         for i in range(n_clusters):
-            
             reg_loss += torch.norm(cluster_means[i, :], p=self._cfg['norm'])
         reg_loss /= float(n_clusters)
         return reg_loss
@@ -393,7 +403,7 @@ class DiscriminativeLoss(torch.nn.Module):
         '''
         delta_var = self.delta_var
         delta_dist = self.delta_dist
-        
+
         c_means = self.find_cluster_means(features, labels)
         loss_dist = self.inter_cluster_loss(c_means, margin=delta_dist)
         loss_var = self.intra_cluster_loss(features,
@@ -404,33 +414,32 @@ class DiscriminativeLoss(torch.nn.Module):
 
         loss = self.alpha * loss_var + self.beta * loss_dist + self.gamma * loss_reg
         if verbose:
-            return [loss, loss_var, loss_dist, loss_reg]
+            return [loss, float(loss_var), float(loss_dist), float(loss_reg)]
         else:
             return [loss]
 
 
     def combine_multiclass(self, features, slabels, clabels):
         '''
-        Wrapper function for combining different components of the loss, 
-        in particular when clustering must be done PER SEMANTIC CLASS. 
+        Wrapper function for combining different components of the loss,
+        in particular when clustering must be done PER SEMANTIC CLASS.
 
         NOTE: When there are multiple semantic classes, we compute the DLoss
         by first masking out by each semantic segmentation (ground-truth/prediction)
-        and then compute the clustering loss over each masked point cloud. 
+        and then compute the clustering loss over each masked point cloud.
 
-        INPUTS: 
+        INPUTS:
             features (torch.Tensor): pixel embeddings
             slabels (torch.Tensor): semantic labels
             clabels (torch.Tensor): group/instance/cluster labels
 
         OUTPUT:
-            loss_segs (list): list of computed loss values for each semantic class. 
-            loss[i] = computed DLoss for semantic class <i>. 
-            acc_segs (list): list of computed clustering accuracy for each semantic class. 
+            loss_segs (list): list of computed loss values for each semantic class.
+            loss[i] = computed DLoss for semantic class <i>.
+            acc_segs (list): list of computed clustering accuracy for each semantic class.
         '''
-        loss, acc_segs = defaultdict(list), defaultdict(list)
-        semantic_classes = slabels.unique()
-        for sc in semantic_classes:
+        loss, acc_segs = defaultdict(list), {}
+        for sc in slabels.unique():
             index = (slabels == sc)
             num_clusters = len(clabels[index].unique())
             # FIXME:
@@ -442,33 +451,36 @@ class DiscriminativeLoss(torch.nn.Module):
             loss['dist_loss'].append(loss_blob[2])
             loss['reg_loss'].append(loss_blob[3])
             acc = self.acc_DUResNet(features[index], clabels[index])
-            acc_segs[sc.item()].append(acc)
+            acc_segs[sc.item()] = acc
         return loss, acc_segs
-    
-    
-    def compute_loss_layer(self, embedding, slabels, clabels, batch_idx):
+
+
+    def compute_loss_layer(self, embedding_scn, slabels, clabels, batch_idx):
         '''
         Compute the multi-class loss for a feature map on a given layer.
         We group the loss computation to a function in order to compute the
-        clustering loss over the decoding feature maps. 
-        
+        clustering loss over the decoding feature maps.
+
         INPUTS:
             - embedding (torch.Tensor): (N, d) Tensor with embedding space
-                coordinates. 
-            - slabels (torch.Tensor): (N, ) Tensor with segmentation labels
-            - clabels (torch.Tensor): (N, ) Tensor with cluster labels
+                coordinates.
+            - slabels (torch.Tensor): (N, 5) Tensor with segmentation labels
+            - clabels (torch.Tensor): (N, 5) Tensor with cluster labels
             - batch_idx (list): list of batch indices, ex. [0, 1, ..., 4]
-            
+
         OUTPUT:
             - loss (torch.Tensor): scalar number (1x1 Tensor) corresponding
-                to calculated loss over a given layer. 
+                to calculated loss over a given layer.
         '''
         loss = defaultdict(list)
         acc = defaultdict(list)
+        embedding = embedding_scn.features
+        coords = embedding_scn.get_spatial_locations().numpy()
+        perm = np.lexsort((coords[:, 2], coords[:, 1], coords[:, 0], coords[:, 3]))
 
         for bidx in batch_idx:
-            index = (slabels[:, 3].int() == bidx)
-            embedding_batch = embedding[index]
+            index = (slabels[:, 3] == bidx)
+            embedding_batch = embedding[perm][index]
             slabels_batch = slabels[index][:, 4]
             clabels_batch = clabels[index][:, 4]
             # Compute discriminative loss for current event in batch
@@ -478,47 +490,37 @@ class DiscriminativeLoss(torch.nn.Module):
                 for loss_type, loss_list in loss_dict.items():
                     loss[loss_type].append(
                         sum(loss_list) / 5.0)
-                for acc_type, acc_list in acc_dict.items():
-                    acc[acc_type].append(sum(acc_list))
-        
+                for acc_type, acc_val in acc_dict.items():
+                    acc[acc_type].append(acc_val)
+
         summed_loss = { key : sum(l) for key, l in loss.items() }
-        summed_acc = { key : sum(l) for key, l in acc.items() }
-        return summed_loss, summed_acc
+        averaged_acc = { key : sum(l) / float(len(l)) for key, l in acc.items() }
+        return summed_loss, averaged_acc
 
 
     def compute_segmentation_loss(self, output_seg, slabels, batch_idx):
         '''
-        Compute the semantic segmentation loss for the final output layer. 
+        Compute the semantic segmentation loss for the final output layer.
 
         INPUTS:
             - output_seg (torch.Tensor): (N, num_classes) Tensor.
-            - slabels (torch.Tensor): (N, ) Tensor with semantic segmentation labels.
+            - slabels (torch.Tensor): (N, 5) Tensor with semantic segmentation labels.
             - batch_idx (list): list of batch indices, ex. [0, 1, 2 ,..., 4]
 
         OUTPUT:
             - loss (torch.Tensor): scalar number (1x1 Tensor) corresponding to
-                to calculated semantic segmentation loss over a given layer. 
+                to calculated semantic segmentation loss over a given layer.
         '''
         loss = 0.0
-        acc = []
-
-        for bidx in batch_idx:
-            index = (slabels[:, 3] == bidx)
-            segmentation = output_seg[index]
-            batch_labels = slabels[index]
-            batch_labels = batch_labels[:, 4].long()
-            loss_seg = self.cross_entropy(segmentation, batch_labels)
-            log_softmax = self.log_softmax(segmentation)
-            pred = torch.argmax(log_softmax, dim=1)
-            batch_acc = (pred == batch_labels).sum().item() / float(pred.nelement())
-            acc.append(batch_acc)
-            loss += torch.mean(loss_seg)
-            
-        acc = sum(acc)
+        acc = 0.0
+        loss = torch.mean(self.cross_entropy(output_seg, slabels[:, 4].long()))
+        with torch.no_grad():
+            pred = torch.argmax(self.log_softmax(output_seg), dim=1)
+            acc = (pred == slabels[:, 4].long()).sum().item() / float(pred.nelement())
         return loss, acc
-            
 
-    def forward(self, out1, out2, out3):
+
+    def forward(self, out, semantic_labels, group_labels):
         '''
         Forward function for the Discriminative Loss Module.
 
@@ -528,33 +530,53 @@ class DiscriminativeLoss(torch.nn.Module):
             group_labels: ground-truth instance labels
         Returns:
             (dict): A dictionary containing key-value pairs for
-            loss, accuracy, etc. 
+            loss, accuracy, etc.
         '''
-        batch_idx = out2[0][:, 3].int().unique(sorted=True)
-        batch_idx = [bidx.item() for bidx in batch_idx]
-        decoding_layers = []
-        loss_seg, acc_seg = self.compute_segmentation_loss(out1[0][0], out2[0], batch_idx)
-        for f in out1[1][0]:
-            embedding = f.features
-            coords = f.get_spatial_locations().numpy()
-            embedding = embedding[np.lexsort(coords.T)]
-            coords = coords[np.lexsort(coords.T)]
-            decoding_layers.append((coords, embedding))
+        loss = defaultdict(list)
+        accuracy = defaultdict(float)
+        #segmentation, embeddings = out[0][0], out[1][0]
+        batch_idx = semantic_labels[0][0][:, 3].detach().cpu().int().numpy()
+        batch_idx = np.unique(batch_idx)
+        loss_seg, acc_seg = self.compute_segmentation_loss(out['segmentation'][0], semantic_labels[0][0], batch_idx)
+        loss['total_loss'].append(loss_seg * float(len(batch_idx)))
 
-        # res = {
-        #     "loss": total_loss['total_total_loss'],
-        #     "loss_seg": total_loss['loss_seg'],
-        #     "loss_clustering": total_loss['total_loss'],
-        #     "var_loss": total_loss['var_loss'],
-        #     "dist_loss": total_loss['dist_loss'],
-        #     "reg_loss": total_loss['reg_loss'],
-        #     "accuracy": total_acc, 
-        #     "acc_0": accuracy[0], 
-        #     "acc_1": accuracy[1], 
-        #     "acc_2": accuracy[2],
-        #     "acc_3": accuracy[3],
-        #     "acc_4": accuracy[4],
-        #     "acc_seg": acc_seg
-        #     }
-        assert False
-        pass
+        # Summing loss over layers. Embeddings has to be lexsorted.
+        for i, em in enumerate(out['embedding'][0]):
+            loss_i, acc_i = self.compute_loss_layer(em, semantic_labels[0][i], group_labels[0][i], batch_idx)
+            for key, val in loss_i.items():
+                loss[key].append(val)
+            # Only compute accuracy in last layer.
+            if i == 0:
+                acc_clustering = acc_i
+        for key, acc in acc_clustering.items():
+            accuracy[key] = float(acc) * len(batch_idx)
+
+        total_loss = sum(loss["total_loss"])
+        var_loss = sum(loss["var_loss"])
+        dist_loss = sum(loss["dist_loss"])
+        reg_loss = sum(loss["reg_loss"])
+
+        total_acc = 0
+        for acc in accuracy.values():
+            total_acc += acc / len(accuracy.keys())
+
+        accuracy['acc_seg'] = float(acc_seg) * len(batch_idx)
+        accuracy['accuracy'] = total_acc
+
+        res = {
+            "loss": total_loss,
+            "var_loss": var_loss,
+            "reg_loss": reg_loss,
+            "seg_loss": float(loss_seg * len(batch_idx)),
+            "acc_0": accuracy[0],
+            "acc_1": accuracy[1],
+            "acc_2": accuracy[2],
+            "acc_3": accuracy[3],
+            "acc_4": accuracy[4],
+            "acc_seg": accuracy['acc_seg'],
+            "accuracy": accuracy['accuracy']
+        }
+
+        print(res)
+
+        return res

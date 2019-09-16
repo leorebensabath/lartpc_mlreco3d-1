@@ -21,6 +21,7 @@ def model_dict():
     from . import uresnet_clustering_v2
     from . import uresnet_clustering_v2_decoder_separate
     from . import uresnet_clustering_density
+    from . import uresnet_clustering_alt2
 
     # Make some models available (not all of them, e.g. PPN is not standalone)
     models = {
@@ -55,6 +56,8 @@ def model_dict():
         "discriminative_multiLayerLoss": (discriminative_multiLayerLoss.UResNet, discriminative_multiLayerLoss.DiscriminativeLoss),
         # Uresnet Clustering
         "uresnet_clustering_alt": (uresnet_clustering_alt.UResNet, uresnet_clustering_alt.DiscriminativeLoss),
+        # Uresnet Clustering2
+        "uresnet_clustering_alt2": (uresnet_clustering_alt2.UResNet, uresnet_clustering_alt2.DiscriminativeLoss),
         # Uresnet Clustering V2
         "uresnet_clustering_v2": (uresnet_clustering_v2.UResNet, uresnet_clustering_v2.ClusteringLoss),
         # Uresnet Clustering V2, with Two Decoders
