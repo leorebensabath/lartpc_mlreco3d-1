@@ -22,6 +22,7 @@ def model_dict():
     from . import uresnet_clustering_alt2
     from . import clusternet
     from . import clusternet_density
+    from . import clusternet_pyramid
 
     # Make some models available (not all of them, e.g. PPN is not standalone)
     models = {
@@ -54,6 +55,8 @@ def model_dict():
         "clusternet": (clusternet.UResNet, clusternet.ClusteringLoss),
         # Clusternet Density
         "clusternet_density": (clusternet_density.UResNet, clusternet_density.ClusteringLoss),
+        # Clusternet Pyramid
+        "clusternet_pyramid": (clusternet_pyramid.UResNet, clusternet_pyramid.ClusteringLoss),
         # Discriminative Loss
         "discriminative_loss": (discriminative_loss.UResNet, discriminative_loss.DiscriminativeLoss),
         # Uresnet Clustering

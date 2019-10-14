@@ -275,7 +275,7 @@ class DiscriminativeLoss(torch.nn.Module):
         slabels = slabels.type(torch.LongTensor)
         clabels = group_labels[0][:, 4]
         batch_idx = semantic_labels[0][:, 3]
-        embedding = out[1][0]
+        embedding = out['cluster_features']
         #print(out)
         #print(embedding)
         loss = defaultdict(list)
@@ -308,10 +308,10 @@ class DiscriminativeLoss(torch.nn.Module):
                 acc, _ = self.acc_DUResNet(embedding_batch, clabels_batch)
                 accuracy.append(acc)
 
-        total_loss = sum(loss["total_loss"])
-        var_loss = sum(loss["var_loss"])
-        dist_loss = sum(loss["dist_loss"])
-        reg_loss = sum(loss["reg_loss"])
+        total_loss = sum(loss["total_loss"]) / nbatch
+        var_loss = sum(loss["var_loss"]) / nbatch
+        dist_loss = sum(loss["dist_loss"]) / nbatch
+        reg_loss = sum(loss["reg_loss"]) / nbatch
         acc_segs = defaultdict(float)
         acc_avg = []
         for i in range(5):
@@ -320,7 +320,7 @@ class DiscriminativeLoss(torch.nn.Module):
                 acc_avg.append(acc_segs[i])
             else:
                 acc_segs[i] = 0.0
-        acc_avg = sum(acc_avg) / float(len(acc_avg)) * nbatch
+        acc_avg = sum(acc_avg) / float(len(acc_avg))
 
 
         return {
