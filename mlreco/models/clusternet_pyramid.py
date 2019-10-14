@@ -8,6 +8,7 @@ import sparseconvnet as scn
 from collections import defaultdict
 
 from mlreco.models.discriminative_loss import DiscriminativeLoss
+from mlreco.models.clusternet import UResNet as ClusterNet 
 
 class UResNet(torch.nn.Module):
     """
@@ -73,6 +74,8 @@ class UResNet(torch.nn.Module):
         self._simpleN = self._model_config.get('simple_conv', False)
         self._hypDim = self._model_config.get('hypDim', 16)
 
+        self.clusternet = ClusterNet(cfg, name='clusternet')
+
         nPlanes = [i*m for i in range(1, num_strides+1)]  # UNet number of features per level
         fcsize = sum(nPlanes)
         nPlanes_decoder = [i * int(fcsize / num_strides) for i in range(num_strides, 0, -1)]
@@ -80,66 +83,31 @@ class UResNet(torch.nn.Module):
         self.last = None
         leakiness = 0.0
 
-        if self._simpleN:
-            def block(m, a, b):  # Normal Conv-BN Layer Style Blocks
-                m.add(scn.Sequential()
-                    .add(scn.BatchNormLeakyReLU(a, leakiness=leakiness))
-                    .add(scn.SubmanifoldConvolution(self._dimension, a, b, 3, False))
-                )
-        else:
-            def block(m, a, b):  # ResNet style blocks
-                m.add(scn.ConcatTable()
-                    .add(scn.Identity() if a == b else scn.NetworkInNetwork(a, b, False))
-                    .add(scn.Sequential()
-                        .add(scn.BatchNormLeakyReLU(a, leakiness=leakiness))
-                        .add(scn.SubmanifoldConvolution(self._dimension, a, b, 3, False))
-                        .add(scn.BatchNormLeakyReLU(b, leakiness=leakiness))
-                        .add(scn.SubmanifoldConvolution(self._dimension, b, b, 3, False)))
-                ).add(scn.AddTable())
-
-        self.input = scn.Sequential().add(
-           scn.InputLayer(self._dimension, self.spatial_size, mode=3)).add(
-           scn.SubmanifoldConvolution(self._dimension, nInputFeatures, m, 3, False)) # Kernel size 3, no bias
-        self.concat = scn.JoinTable()
-
-        # Encoding
-        self.encoding_block = scn.Sequential()
-        self.encoding_conv = scn.Sequential()
-
         # UnPooling
         self.unpooling = scn.Sequential()
 
-        module = scn.Sequential()
         for i in range(num_strides):
-            module = scn.Sequential()
-            for _ in range(reps):
-                block(module, nPlanes[i], nPlanes[i])
-            self.encoding_block.add(module)
-            module2 = scn.Sequential()
             if i < num_strides-1:
-                module2.add(
-                    scn.BatchNormLeakyReLU(nPlanes[i], leakiness=leakiness)).add(
-                    scn.Convolution(self._dimension, nPlanes[i], nPlanes[i+1],
-                        downsample[0], downsample[1], False))
                 module_unpool = scn.Sequential()
                 for _ in range(num_strides-1-i):
                     module_unpool.add(
                         scn.UnPooling(self._dimension, downsample[0], downsample[1]))
                 self.unpooling.add(module_unpool)
-                self.encoding_conv.add(module2)
 
         # Decoding
-        self.decoder = scn.Sequential()
+        self.cluster_decoder = scn.Sequential()
         for i in range(num_strides-1):
             module = scn.Sequential()
             module.add(
                 scn.BatchNormLeakyReLU(nPlanes_decoder[i])).add(
                 scn.NetworkInNetwork(nPlanes_decoder[i], nPlanes_decoder[i+1], False))
-            self.decoder.add(module)
+            self.cluster_decoder.add(module)
 
-        self.output = scn.Sequential().add(
+        self.cluster_output = scn.Sequential().add(
            scn.BatchNormReLU(nPlanes_decoder[-1])).add(
            scn.OutputLayer(self._dimension))
+
+        self.concat = scn.JoinTable()
 
         # Last Linear Layers
         self.linear = torch.nn.Linear(nPlanes_decoder[-1] + (3 if self._coordConv else 0), self._hypDim)
@@ -155,19 +123,13 @@ class UResNet(torch.nn.Module):
         coords = point_cloud[:, 0:self._dimension+1].float()
         features = point_cloud[:, self._dimension+1:self._dimension+2].float()
 
-        x = self.input((coords, features))
-        # Embeddings at each layer
-        feature_maps = []
-        # Loop over Encoding Blocks to make downsampled segmentation/clustering masks.
-        for i, layer in enumerate(self.encoding_block):
-            x = self.encoding_block[i](x)
-            feature_maps.append(x)
-            if i < self._num_strides-1:
-                x = self.encoding_conv[i](x)
+        cnet_output = self.clusternet(input)
+
+        feature_dec = cnet_output['cluster_feature']
 
         # Feature Maps for Clustering
         feature_clustering = []
-        for i, layer in enumerate(feature_maps[::-1]):
+        for i, layer in enumerate(feature_dec[0][::-1]):
             if i < self._num_strides-1:
                 f = self.unpooling[i](layer)
                 feature_clustering.append(f)
@@ -175,14 +137,17 @@ class UResNet(torch.nn.Module):
                 feature_clustering.append(layer)
         
         out = self.concat(feature_clustering)
-        out = self.decoder(out)
-        out = self.output(out)
+        out = self.cluster_decoder(out)
+        out = self.cluster_output(out)
         if self._coordConv:
             normalized_coords = (coords[:, 0:3] - self.spatial_size /2) / float(self.spatial_size)
             out = torch.cat([out, normalized_coords], dim=1)
         out = self.linear(out)
 
-        res = {'cluster_features': out}
+        res = {
+            'segmentation': cnet_output['segmentation'],
+            'cluster_features': out
+            }
 
         return res
 
@@ -195,8 +160,5 @@ class ClusteringLoss(nn.Module):
         self.clustering_loss = DiscriminativeLoss(cfg)
     
     def forward(self, result, slabel, clabel):
-        print(result)
-        print(slabel[0])
-        print(clabel[0])
         cluster_res = self.clustering_loss(result, slabel, clabel)
         return cluster_res
