@@ -74,14 +74,15 @@ class UResNet(torch.nn.Module):
         self._simpleN = self._model_config.get('simple_conv', False)
         self._hypDim = self._model_config.get('hypDim', 16)
 
-        self.clusternet = ClusterNet(cfg, name='clusternet')
-
         nPlanes = [i*m for i in range(1, num_strides+1)]  # UNet number of features per level
         fcsize = sum(nPlanes)
         nPlanes_decoder = [i * int(fcsize / num_strides) for i in range(num_strides, 0, -1)]
         downsample = [kernel_size, 2]  # [filter size, filter stride]
         self.last = None
         leakiness = 0.0
+
+        # Clusternet Backbone (Multilayer Loss)
+        self.clusternet = ClusterNet(cfg, name='clusternet')
 
         # UnPooling
         self.unpooling = scn.Sequential()
@@ -94,7 +95,7 @@ class UResNet(torch.nn.Module):
                         scn.UnPooling(self._dimension, downsample[0], downsample[1]))
                 self.unpooling.add(module_unpool)
 
-        # Decoding
+        # Feature Reducing Layers (NINs)
         self.cluster_decoder = scn.Sequential()
         for i in range(num_strides-1):
             module = scn.Sequential()
@@ -103,13 +104,14 @@ class UResNet(torch.nn.Module):
                 scn.NetworkInNetwork(nPlanes_decoder[i], nPlanes_decoder[i+1], False))
             self.cluster_decoder.add(module)
 
+        # Output Layer for Clustering
         self.cluster_output = scn.Sequential().add(
            scn.BatchNormReLU(nPlanes_decoder[-1])).add(
            scn.OutputLayer(self._dimension))
 
         self.concat = scn.JoinTable()
 
-        # Last Linear Layers
+        # Last Linear Layers (for tunable hyperspace dimension)
         self.linear = torch.nn.Linear(nPlanes_decoder[-1] + (3 if self._coordConv else 0), self._hypDim)
 
     def forward(self, input):

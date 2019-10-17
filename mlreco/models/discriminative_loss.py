@@ -25,8 +25,8 @@ class UResNet(torch.nn.Module):
         m = model_config['filters']  # Unet number of features
         nPlanes = [i * m for i in range(1, model_config['num_strides'] + 1)]
         nInputFeatures = 1
-        self._offset = model_config.get('offset', False)
-        if self._offset:
+        self._coordConv = model_config.get('coordConv', False)
+        if self._coordConv:
             nInputFeatures += 3
         self.sparseModel = scn.Sequential().add(
             scn.InputLayer(dimension, model_config['spatial_size'], mode=3)).add(
@@ -36,7 +36,7 @@ class UResNet(torch.nn.Module):
                      downsample=[kernel_size, 2], leakiness=0.25)).add(
                    # downsample = [filter size, filter stride]
             scn.BatchNormReLU(m)).add(scn.OutputLayer(dimension))
-        if self._offset:
+        if self._coordConv:
             self.linear = torch.nn.Linear(m, model_config['num_classes'])
         else:
             self.linear = torch.nn.Linear(m, model_config['num_classes'])
@@ -52,7 +52,7 @@ class UResNet(torch.nn.Module):
         coords = point_cloud[:, :-2].float()
         normalized_coords = (coords - self.spatial_size / 2) / float(self.spatial_size / 2)
         features = point_cloud[:, -1][:, None].float()
-        if self._offset:
+        if self._coordConv:
             features = torch.cat([normalized_coords, features], dim=1)
             emb = self.sparseModel((coords, features))
         else:
@@ -99,7 +99,7 @@ class DiscriminativeLoss(torch.nn.Module):
         cluster_means = torch.stack(cluster_means)
         return cluster_means
 
-    def intra_cluster_loss(self, features, labels, cluster_means, margin=1):
+    def intra_cluster_loss(self, features, labels, cluster_means, margin=0.5):
         '''
         Implementation of variance loss in Discriminative Loss.
         Inputs:
@@ -127,7 +127,7 @@ class DiscriminativeLoss(torch.nn.Module):
         var_loss /= n_clusters
         return var_loss
 
-    def inter_cluster_loss(self, cluster_means, margin=2):
+    def inter_cluster_loss(self, cluster_means, margin=1.5):
         '''
         Implementation of distance loss in Discriminative Loss.
         Inputs:
@@ -172,7 +172,10 @@ class DiscriminativeLoss(torch.nn.Module):
 
     def acc_DUResNet(self, embedding, truth, bandwidth=0.5):
         '''
-        Compute Adjusted Rand Index Score for given embedding coordinates.
+        Compute Adjusted Rand Index Score for given embedding coordinates,
+        where predicted cluster labels are obtained from distance to closest
+        centroid (computes heuristic accuracy). 
+
         Inputs:
             embedding (torch.Tensor): (N, d) Tensor where 'd' is the embedding dimension.
             truth (torch.Tensor): (N, ) Tensor for the ground truth clustering labels.

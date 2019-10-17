@@ -72,7 +72,6 @@ class trainval(object):
             total_loss += loss
         total_loss /= len(self._loss)
         self._loss = []  # Reset loss accumulator
-
         self._optimizer.zero_grad()  # Reset gradients accumulation
         total_loss.backward()
         # torch.nn.utils.clip_grad_norm_(self._net.parameters(), 1.0)
@@ -358,7 +357,8 @@ class trainval(object):
                         # This overwrites the learning rate, so reset the learning rate
                         self._optimizer.load_state_dict(checkpoint['optimizer'])
                         for g in self._optimizer.param_groups:
-                            g['lr'] = self._learning_rate
+                            self._learning_rate = g['lr']
+                            # g['lr'] = self._learning_rate
                     if module == '':  # Root model sets iteration
                         iteration = checkpoint['global_step'] + 1
                 print('Done.')
