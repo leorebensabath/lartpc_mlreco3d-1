@@ -56,7 +56,7 @@ def model_dict():
         # Clusternet Density
         "clusternet_density": (clusternet_density.KDENet, clusternet_density.ClusteringLoss),
         # Clusternet Pyramid
-        "clusternet_pyramid": (clusternet_pyramid.PyramidNet, clusternet_pyramid.ClusteringLoss),
+        "clusternet_hierarchy": (clusternet_pyramid.HierarchyNet, clusternet_pyramid.ClusteringLoss),
         # Discriminative Loss
         "discriminative_loss": (discriminative_loss.UResNet, discriminative_loss.DiscriminativeLoss),
         # Uresnet Clustering

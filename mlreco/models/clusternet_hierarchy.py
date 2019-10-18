@@ -1,25 +1,16 @@
 import torch
-import sys
 import torch.nn as nn
 import numpy as np
-import torch.nn.functional as F
-import torch.optim as optim
 import sparseconvnet as scn
-from collections import defaultdict
 
 from mlreco.models.discriminative_loss import DiscriminativeLoss
-from mlreco.models.clusternet import ClusterNet 
+from mlreco.models.clusternet import ClusterNet
 
-class PyramidNet(torch.nn.Module):
+class HierarchyNet(torch.nn.Module):
     """
-    UResNet
+    HierarchyNet
 
-    For semantic segmentation, using sparse convolutions from SCN, but not the
-    ready-made UNet from SCN library. The option `ghost` allows to train at the
-    same time for semantic segmentation between N classes (e.g. particle types)
-    and ghost points masking.
-
-    Can also be used in a chain, for example stacking PPN layers on top.
+    Variant of Sparse UResNet, see documentation for details.
 
     Configuration
     -------------
@@ -34,31 +25,30 @@ class PyramidNet(torch.nn.Module):
         Dimension 2 or 3
     spatial_size : int
         Size of the cube containing the data, e.g. 192, 512 or 768px.
-    ghost : bool, optional
-        Whether to compute ghost mask separately or not. See SegmentationLoss
-        for more details.
     reps : int, optional
         Convolution block repetition factor
     kernel_size : int, optional
         Kernel size for the SC (sparse convolutions for down/upsample).
     features: int, optional
-        How many features are given to the network initially.
-
-    Returns
-    -------
-    In order:
-    - segmentation scores (N, 5)
-    - feature map for PPN1
-    - feature map for PPN2
-    - if `ghost`, segmentation scores for deghosting (N, 2)
+        How many features are given to the network initially
+    N: int, optional
+        Performs N convolution operation at each layer to transform from segmentation
+        features to clustering features
+    coordConv: bool, optional
+        If True, network concatenates normalized coordinates (between -1 and 1) to 
+        the feature tensor before the final 1x1 convolution (linear) layer. 
+    simpleN: bool, optional
+        Uses ResNet blocks by default. If True, N-convolution blocks are replaced with
+        simple BN + SubMfdConv layers.
+    hypDim: int, optional
+        Dimension of clustering hyperspace.
     """
 
     def __init__(self, cfg, name="clusternet"):
         super(PyramidNet, self).__init__()
-        import sparseconvnet as scn
         self._model_config = cfg['modules'][name]
 
-        # Whether to compute ghost mask separately or not
+        # Model Configurations
         self._dimension = self._model_config.get('data_dim', 3)
         reps = self._model_config.get('reps', 2)  # Conv block repetition factor
         kernel_size = self._model_config.get('kernel_size', 2)
@@ -72,13 +62,12 @@ class PyramidNet(torch.nn.Module):
         self._coordConv = self._model_config.get('coordConv', False)
         self._simpleN = self._model_config.get('simple_conv', False)
         self._hypDim = self._model_config.get('hypDim', 16)
+        self._leakiness = self._model_config.get('leakiness', 0.0)
 
         nPlanes = [i*m for i in range(1, num_strides+1)]  # UNet number of features per level
         fcsize = sum(nPlanes)
         nPlanes_decoder = [i * int(fcsize / num_strides) for i in range(num_strides, 0, -1)]
         downsample = [kernel_size, 2]  # [filter size, filter stride]
-        self.last = None
-        leakiness = 0.0
 
         # Clusternet Backbone (Multilayer Loss)
         self.clusternet = ClusterNet(cfg, name='clusternet')
@@ -119,6 +108,13 @@ class PyramidNet(torch.nn.Module):
         point_cloud[0] has 3 spatial coordinates + 1 batch coordinate + 1 feature
         label has shape (point_cloud.shape[0] + 5*num_labels, 1)
         label contains segmentation labels for each point + coords of gt points
+
+        Returns:
+            - res (dict): dictionary of a list of tensors, where the length of each
+            list corresponds to minibatch size. 
+
+            - segmentation: semantic segmentation scores (N x 5)
+            - cluster_features: clustering hyperspace embedding coordinates (N x d)
         """
         point_cloud = input[0]
         coords = point_cloud[:, 0:self._dimension+1].float()

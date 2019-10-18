@@ -1,8 +1,6 @@
 import torch
 import torch.nn as nn
 import numpy as np
-import torch.nn.functional as F
-import torch.optim as optim
 import sparseconvnet as scn
 from collections import defaultdict
 
@@ -52,7 +50,6 @@ class ClusterNet(torch.nn.Module):
 
     def __init__(self, cfg, name="clusternet"):
         super(ClusterNet, self).__init__()
-        import sparseconvnet as scn
         self._model_config = cfg['modules'][name]
 
         self._dimension = self._model_config.get('data_dim', 3)

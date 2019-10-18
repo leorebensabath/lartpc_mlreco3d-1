@@ -1,12 +1,9 @@
 import torch
 import torch.nn as nn
 import numpy as np
-import torch.nn.functional as F
-import torch.optim as optim
 import sparseconvnet as scn
 
 from collections import defaultdict
-import sklearn.cluster as skc
 from sklearn.metrics import adjusted_rand_score
 
 

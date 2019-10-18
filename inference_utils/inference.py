@@ -4,6 +4,7 @@ import sys
 import os, re
 import torch
 import yaml
+import time
 
 from pathlib import Path
 import argparse
@@ -21,7 +22,7 @@ from mlreco.main_funcs import cycle
 
 from sklearn.cluster import DBSCAN
 
-def join_training_logs():
+def join_training_logs(log_dir):
 
     pass
 
@@ -80,7 +81,6 @@ def main_loop(train_cfg, **kwargs):
     loaded_iteration = Trainer.initialize()
 
     output = []
-    clusterer = DBSCAN(eps=kwargs['eps'], min_samples=kwargs['min_samples'])
 
     iterations = inference_cfg['trainval']['iterations']
 
@@ -97,6 +97,8 @@ def main_loop(train_cfg, **kwargs):
         index = data_blob['index'][0][0]
 
         acc_dict = {}
+        eps, min_samples = kwargs['eps'], kwargs['min_samples']
+        clusterer = DBSCAN(eps=eps, min_samples=min_samples)
 
         for c in (np.unique(semantic_labels)):
             semantic_mask = semantic_labels == c
@@ -110,11 +112,11 @@ def main_loop(train_cfg, **kwargs):
             ari = ARI(pred, clabels)
             nclusters = len(np.unique(clabels))
 
-            row = (index, c, ari, purity, efficiency, nclusters)
+            row = (index, c, ari, purity, efficiency, nclusters, eps, min_samples)
             output.append(row)
 
     output = pd.DataFrame(output, columns=['Index', 'Class', 'ARI',
-                'Purity', 'Efficiency', 'num_clusters'])
+                'Purity', 'Efficiency', 'num_clusters', 'eps', 'min_samples'])
     return output
 
 
@@ -134,14 +136,16 @@ if __name__ == "__main__":
     train_cfg = args['config_path']
 
     eps_list = np.linspace(0.1, 3.0, 30)
-    ms_list = [3, 5]
+    ms_list = [3, 4, 5]
 
     for eps in eps_list:
         for ms in ms_list:
             dbscan_args = {'eps': eps, 'min_samples': ms,
                 'gpu': args['gpu'], 'iterations': args['iterations']}
-            print(eps, ms)
+            start = time.time()
             res = main_loop(train_cfg, **dbscan_args)
+            end = time.time()
+            print("Time = {}".format(end - start))
             name = '{}_eps{}_ms{}.csv'.format(args['name'], eps, ms)
             target = os.path.join(args['target'], name)
             res.to_csv(target, index=False)

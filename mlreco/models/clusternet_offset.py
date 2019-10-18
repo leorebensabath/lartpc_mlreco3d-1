@@ -1,13 +1,9 @@
 import torch
 import torch.nn as nn
 import numpy as np
-import torch.nn.functional as F
-import torch.optim as optim
 import sparseconvnet as scn
 
 from collections import defaultdict
-import sklearn.cluster as skc
-from sklearn.metrics import adjusted_rand_score
 
 from discriminative_loss import UResNet, DiscriminativeLoss
 
@@ -21,7 +17,6 @@ class OVRNet(nn.Module):
 
     def __init__(self, cfg, name='clusternet_offset'):
         super(OVRNet, self).__init__()
-        import sparseconvnet as scn
         model_config = cfg['modules']['discriminative_loss']
 
         # UResNet Backbone (Multilayer Loss)

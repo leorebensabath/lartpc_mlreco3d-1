@@ -119,7 +119,6 @@ class CSVData:
                 self._str+='{:f}'
             self._fout.write('\n')
             self._str+='\n'
-
         self._fout.write(self._str.format(*(self._dict.values())))
 
     def flush(self):

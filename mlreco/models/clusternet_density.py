@@ -1,23 +1,16 @@
 import torch
-import sys
 import torch.nn as nn
 import numpy as np
-import torch.nn.functional as F
-import torch.optim as optim
 import sparseconvnet as scn
 from collections import defaultdict
 
 
 class KDENet(torch.nn.Module):
     """
-    UResNet
+    KDENet
 
-    For semantic segmentation, using sparse convolutions from SCN, but not the
-    ready-made UNet from SCN library. The option `ghost` allows to train at the
-    same time for semantic segmentation between N classes (e.g. particle types)
-    and ghost points masking.
-
-    Can also be used in a chain, for example stacking PPN layers on top.
+    Enhancement of ClusterNet, analogous to Kernel Density Estimation. 
+    See documentation for details.
 
     Configuration
     -------------
@@ -32,28 +25,27 @@ class KDENet(torch.nn.Module):
         Dimension 2 or 3
     spatial_size : int
         Size of the cube containing the data, e.g. 192, 512 or 768px.
-    ghost : bool, optional
-        Whether to compute ghost mask separately or not. See SegmentationLoss
-        for more details.
     reps : int, optional
         Convolution block repetition factor
     kernel_size : int, optional
         Kernel size for the SC (sparse convolutions for down/upsample).
     features: int, optional
-        How many features are given to the network initially.
-
-    Returns
-    -------
-    In order:
-    - segmentation scores (N, 5)
-    - feature map for PPN1
-    - feature map for PPN2
-    - if `ghost`, segmentation scores for deghosting (N, 2)
+        How many features are given to the network initially
+    N: int, optional
+        Performs N convolution operation at each layer to transform from segmentation
+        features to clustering features
+    coordConv: bool, optional
+        If True, network concatenates normalized coordinates (between -1 and 1) to 
+        the feature tensor before the final 1x1 convolution (linear) layer. 
+    simpleN: bool, optional
+        Uses ResNet blocks by default. If True, N-convolution blocks are replaced with
+        simple BN + SubMfdConv layers.
+    hypDim: int, optional
+        Dimension of clustering hyperspace.
     """
 
     def __init__(self, cfg, name="clusternet_density"):
         super(KDENet, self).__init__()
-        import sparseconvnet as scn
         self._model_config = cfg['modules'][name]
 
         # Whether to compute ghost mask separately or not
