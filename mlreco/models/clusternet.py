@@ -7,7 +7,7 @@ import sparseconvnet as scn
 from collections import defaultdict
 
 
-class UResNet(torch.nn.Module):
+class ClusterNet(torch.nn.Module):
     """
     UResNet
 
@@ -51,11 +51,10 @@ class UResNet(torch.nn.Module):
     """
 
     def __init__(self, cfg, name="clusternet"):
-        super(UResNet, self).__init__()
+        super(ClusterNet, self).__init__()
         import sparseconvnet as scn
         self._model_config = cfg['modules'][name]
 
-        # Whether to compute ghost mask separately or not
         self._dimension = self._model_config.get('data_dim', 3)
         reps = self._model_config.get('reps', 2)  # Conv block repetition factor
         kernel_size = self._model_config.get('kernel_size', 2)
@@ -65,7 +64,6 @@ class UResNet(torch.nn.Module):
         self.spatial_size = self._model_config.get('spatial_size', 512)
         num_classes = self._model_config.get('num_classes', 5)
         self._N = self._model_config.get('N', 0)
-        self._use_gpu = self._model_config.get('use_gpu', False)
         self._coordConv = self._model_config.get('coordConv', False)
         self._simpleN = self._model_config.get('simple_conv', False)
         self._hypDim = self._model_config.get('hypDim', 16)

@@ -8,9 +8,9 @@ import sparseconvnet as scn
 from collections import defaultdict
 
 from mlreco.models.discriminative_loss import DiscriminativeLoss
-from mlreco.models.clusternet import UResNet as ClusterNet 
+from mlreco.models.clusternet import ClusterNet 
 
-class UResNet(torch.nn.Module):
+class PyramidNet(torch.nn.Module):
     """
     UResNet
 
@@ -54,7 +54,7 @@ class UResNet(torch.nn.Module):
     """
 
     def __init__(self, cfg, name="clusternet"):
-        super(UResNet, self).__init__()
+        super(PyramidNet, self).__init__()
         import sparseconvnet as scn
         self._model_config = cfg['modules'][name]
 
@@ -69,7 +69,6 @@ class UResNet(torch.nn.Module):
         self.spatial_size = self._model_config.get('spatial_size', 512)
         num_classes = self._model_config.get('num_classes', 5)
         self._N = self._model_config.get('N', 0)
-        self._use_gpu = self._model_config.get('use_gpu', False)
         self._coordConv = self._model_config.get('coordConv', False)
         self._simpleN = self._model_config.get('simple_conv', False)
         self._hypDim = self._model_config.get('hypDim', 16)
@@ -148,7 +147,7 @@ class UResNet(torch.nn.Module):
 
         res = {
             'segmentation': cnet_output['segmentation'],
-            'cluster_features': out
+            'cluster_features': [out]
             }
 
         return res

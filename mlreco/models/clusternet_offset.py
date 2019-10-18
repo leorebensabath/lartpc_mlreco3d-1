@@ -11,7 +11,7 @@ from sklearn.metrics import adjusted_rand_score
 
 from discriminative_loss import UResNet, DiscriminativeLoss
 
-class ORNet(nn.Module):
+class OVRNet(nn.Module):
     """
     Clustering by offset vector regression, which is inspired from
     Hugh voting in computer vision.
@@ -20,7 +20,7 @@ class ORNet(nn.Module):
     """
 
     def __init__(self, cfg, name='clusternet_offset'):
-        super(UResNet, self).__init__()
+        super(OVRNet, self).__init__()
         import sparseconvnet as scn
         model_config = cfg['modules']['discriminative_loss']
 
@@ -141,7 +141,7 @@ class OffsetLoss(nn.Module):
 
             # Computing the Discriminative Loss
             if self._cfg['multiclass']:
-                loss_dict, acc_segs = self.combine_multiclass(
+                loss_dict, acc_segs = self.combine_multiclass_regression(
                     embedding_batch, slabels_batch, clabels_batch)
                 #print(acc_segs)
                 loss["total_loss"].append(

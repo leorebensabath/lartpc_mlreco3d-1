@@ -52,11 +52,11 @@ def model_dict():
         # direction model
         "clust_dir_model": (cluster_dir_gnn.EdgeModel, cluster_dir_gnn.EdgeChannelLoss),
         # Clusternet
-        "clusternet": (clusternet.UResNet, clusternet.ClusteringLoss),
+        "clusternet": (clusternet.ClusterNet, clusternet.ClusteringLoss),
         # Clusternet Density
-        "clusternet_density": (clusternet_density.UResNet, clusternet_density.ClusteringLoss),
+        "clusternet_density": (clusternet_density.KDENet, clusternet_density.ClusteringLoss),
         # Clusternet Pyramid
-        "clusternet_pyramid": (clusternet_pyramid.UResNet, clusternet_pyramid.ClusteringLoss),
+        "clusternet_pyramid": (clusternet_pyramid.PyramidNet, clusternet_pyramid.ClusteringLoss),
         # Discriminative Loss
         "discriminative_loss": (discriminative_loss.UResNet, discriminative_loss.DiscriminativeLoss),
         # Uresnet Clustering

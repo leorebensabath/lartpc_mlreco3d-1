@@ -58,8 +58,10 @@ class UResNet(torch.nn.Module):
         else:
             emb = self.sparseModel((coords, features))
         x = self.linear(emb)
-        return [[emb], 
-               [x]]
+        return {
+            'segmentation': [x],
+            'cluster_feature': [emb]
+        }
 
 
 class DiscriminativeLoss(torch.nn.Module):
@@ -278,9 +280,7 @@ class DiscriminativeLoss(torch.nn.Module):
         slabels = slabels.type(torch.LongTensor)
         clabels = group_labels[0][:, 4]
         batch_idx = semantic_labels[0][:, 3]
-        embedding = out['cluster_features']
-        #print(out)
-        #print(embedding)
+        embedding = out['cluster_features'][0]
         loss = defaultdict(list)
         accuracy = defaultdict(list)
         nbatch = int(batch_idx.unique().shape[0])

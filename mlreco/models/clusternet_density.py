@@ -8,7 +8,7 @@ import sparseconvnet as scn
 from collections import defaultdict
 
 
-class UResNet(torch.nn.Module):
+class KDENet(torch.nn.Module):
     """
     UResNet
 
@@ -51,8 +51,8 @@ class UResNet(torch.nn.Module):
     - if `ghost`, segmentation scores for deghosting (N, 2)
     """
 
-    def __init__(self, cfg, name="clusternet"):
-        super(UResNet, self).__init__()
+    def __init__(self, cfg, name="clusternet_density"):
+        super(KDENet, self).__init__()
         import sparseconvnet as scn
         self._model_config = cfg['modules'][name]
 
@@ -66,7 +66,6 @@ class UResNet(torch.nn.Module):
         self.spatial_size = self._model_config.get('spatial_size', 512)
         num_classes = self._model_config.get('num_classes', 5)
         self._N = self._model_config.get('N', 0)
-        self._use_gpu = self._model_config.get('use_gpu', False)
         self._simpleN = self._model_config.get('simple_conv', False)
         self._hypDim = self._model_config.get('hypDim', 16)
 
