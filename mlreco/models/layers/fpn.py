@@ -28,23 +28,23 @@ class FPN(torch.nn.Module):
         Dimension 2 or 3
     spatial_size : int
         Size of the cube containing the data, e.g. 192, 512 or 768px.
-    ghost : bool, optional
-        Whether to compute ghost mask separately or not. See SegmentationLoss
-        for more details.
     reps : int, optional
         Convolution block repetition factor
     kernel_size : int, optional
         Kernel size for the SC (sparse convolutions for down/upsample).
     features: int, optional
-        How many features are given to the network initially.
-
-    Returns
-    -------
-    In order:
-    - segmentation scores (N, 5)
-    - feature map for PPN1
-    - feature map for PPN2
-    - if `ghost`, segmentation scores for deghosting (N, 2)
+        How many features are given to the network initially
+    N: int, optional
+        Performs N convolution operation at each layer to transform from segmentation
+        features to clustering features
+    coordConv: bool, optional
+        If True, network concatenates normalized coordinates (between -1 and 1) to 
+        the feature tensor before the final 1x1 convolution (linear) layer. 
+    simpleN: bool, optional
+        Uses ResNet blocks by default. If True, N-convolution blocks are replaced with
+        simple BN + SubMfdConv layers.
+    hypDim: int, optional
+        Dimension of clustering hyperspace.
     """
 
     def __init__(self, cfg, name="clusternet_fpn"):
@@ -71,6 +71,50 @@ class FPN(torch.nn.Module):
         nPlanes = [i*m for i in range(1, num_strides+1)]  # UNet number of features per level
         downsample = [kernel_size, 2]  # [filter size, filter stride]
 
+        # InputLayer
+        self.input = scn.Sequential().add(
+           scn.InputLayer(self._dimension, self.spatial_size, mode=3)).add(
+           scn.SubmanifoldConvolution(self._dimension, nInputFeatures, m, 3, False))
+
+        # Encoder
+        self.encoding_block = scn.Sequential()
+        self.encoding_conv = scn.Sequential()
+        for i in range(num_strides):
+            module = scn.Sequential()
+            for _ in range(reps):
+                block(module, nPlanes[i], nPlanes[i])
+            self.encoding_block.add(module)
+            module2 = scn.Sequential()
+            if i < num_strides-1:
+                module2.add(
+                    scn.BatchNormLeakyReLU(nPlanes[i], leakiness=leakiness)).add(
+                    scn.Convolution(self._dimension, nPlanes[i], nPlanes[i+1],
+                        downsample[0], downsample[1], False))
+            self.encoding_conv.add(module2)
+
+        # 1x1 Convolution Maps
+        self.lateral = scn.Sequential()nPlanes_decoder
+        for i in range(num_strides):
+            self.lateral.add(
+                scn.NetworkInNetwork(nPlanes[i], nPlanes[i+1], False)
+            )
+        
+        # Decoder
+        self.decoding_block = scn.Sequential()
+        self.decoding_conv = scn.Sequential()
+        for i in range(num_strides-2, -1, -1):
+            module1 = scn.Sequential().add(
+                scn.BatchNormLeakyReLU(nPlanes[i+1], leakiness=leakiness)).add(
+                scn.Deconvolution(self._dimension, nPlanes[i+1], nPlanes[i],
+                    downsample[0], downsample[1], False))
+            self.decoding_conv.add(module1)
+            module2 = scn.Sequential()
+            for j in range(reps):
+                block(module2, nPlanes[i], nPlanes[i])
+            self.decoding_blocks.add(module2)
+        
+        self.elemwise_add = scn.AddTable()
+
 
     def forward(self, input):
         """
@@ -83,26 +127,10 @@ class FPN(torch.nn.Module):
         coords = point_cloud[:, 0:self._dimension+1].float()
         features = point_cloud[:, self._dimension+1:self._dimension+2].float()
 
-        cnet_output = self.clusternet(input)
+        x = self.input((coords, features))
 
-        feature_dec = cnet_output['cluster_feature']
-
-        # Feature Maps for Clustering
-        feature_clustering = []
-        for i, layer in enumerate(feature_dec[0][::-1]):
-            if i < self._num_strides-1:
-                f = self.unpooling[i](layer)
-                feature_clustering.append(f)
-            else:
-                feature_clustering.append(layer)
-        
-        out = self.concat(feature_clustering)
-        out = self.cluster_decoder(out)
-        out = self.cluster_output(out)
-        if self._coordConv:
-            normalized_coords = (coords[:, 0:3] - self.spatial_size /2) / float(self.spatial_size)
-            out = torch.cat([out, normalized_coords], dim=1)
-        out = self.linear(out)
+        encoder_layers = []
+        decoder_layers = []
 
         res = {
             'segmentation': cnet_output['segmentation'],

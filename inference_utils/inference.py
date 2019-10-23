@@ -90,10 +90,13 @@ def main_loop(train_cfg, **kwargs):
 
         data_blob, res = Trainer.forward(dataset)
         # segmentation = res['segmentation'][0]
-        embedding = res['cluster_features'][0]
-        semantic_labels = data_blob['segment_label'][0][:, -1]
-        cluster_labels = data_blob['cluster_label'][0][:, -1]
+        embedding = res['cluster_feature'][0][0]
+        semantic_labels = data_blob['segment_label'][0][0][:, -1]
+        cluster_labels = data_blob['cluster_label'][0][0][:, -1]
         coords = data_blob['input_data'][0][:, :3]
+        perm = np.lexsort((coords[:, 2], coords[:, 1], coords[:, 0]))
+        embedding = embedding[:, 4:][perm]
+        coords = coords[perm]
         index = data_blob['index'][0][0]
 
         acc_dict = {}
@@ -135,7 +138,7 @@ if __name__ == "__main__":
 
     train_cfg = args['config_path']
 
-    eps_list = np.linspace(0.1, 3.0, 30)
+    eps_list = np.linspace(0.1, 1.5, 15)
     ms_list = [3, 4, 5]
 
     for eps in eps_list:

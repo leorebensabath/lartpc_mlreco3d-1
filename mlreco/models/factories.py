@@ -10,19 +10,18 @@ def model_dict():
     from . import full_edge_gnn
     from . import iter_edge_gnn
     from . import chain_gnn
-    #from . import mst_gnn
     from . import cluster_edge_gnn
     from . import cluster_dir_gnn
     from . import uresnet_clustering
 
     from . import discriminative_loss
-    from . import uresnet_clustering_alt
     from . import uresnet_clustering_v2
     from . import uresnet_clustering_v2_decoder_separate
-    from . import uresnet_clustering_alt2
     from . import clusternet
     from . import clusternet_density
-    from . import clusternet_pyramid
+    from . import clusternet_hierarchy
+    from . import clusternet_offset
+    from . import clusternet_adaptis
 
     # Make some models available (not all of them, e.g. PPN is not standalone)
     models = {
@@ -56,13 +55,13 @@ def model_dict():
         # Clusternet Density
         "clusternet_density": (clusternet_density.KDENet, clusternet_density.ClusteringLoss),
         # Clusternet Pyramid
-        "clusternet_hierarchy": (clusternet_pyramid.HierarchyNet, clusternet_pyramid.ClusteringLoss),
+        "clusternet_hierarchy": (clusternet_hierarchy.HierarchyNet, clusternet_hierarchy.ClusteringLoss),
+        # Clusternet Offset
+        "clusternet_offset": (clusternet_offset.OVRNet, clusternet_offset.OffsetLoss),
+        # Clusternet AdaptIS
+        "clusternet_adaptis": (clusternet_adaptis.AdaptIS, clusternet_adaptis.ClusteringLoss),
         # Discriminative Loss
         "discriminative_loss": (discriminative_loss.UResNet, discriminative_loss.DiscriminativeLoss),
-        # Uresnet Clustering
-        "uresnet_clustering_alt": (uresnet_clustering_alt.UResNet, uresnet_clustering_alt.DiscriminativeLoss),
-        # Uresnet Clustering2
-        "uresnet_clustering_alt2": (uresnet_clustering_alt2.UResNet, uresnet_clustering_alt2.DiscriminativeLoss),
         # Uresnet Clustering V2
         "uresnet_clustering_v2": (uresnet_clustering_v2.UResNet, uresnet_clustering_v2.ClusteringLoss),
         # Uresnet Clustering V2, with Two Decoders

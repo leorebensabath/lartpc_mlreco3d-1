@@ -45,7 +45,7 @@ class HierarchyNet(torch.nn.Module):
     """
 
     def __init__(self, cfg, name="clusternet"):
-        super(PyramidNet, self).__init__()
+        super(HierarchyNet, self).__init__()
         self._model_config = cfg['modules'][name]
 
         # Model Configurations
