@@ -41,6 +41,10 @@ class AdaIN(nn.Module):
         self._weight = 1.0
         self._bias = 0.0
     
+    @property
+    def weight(self):
+        return self._weight
+
     @weight.setter
     def weight(self, weight):
         '''
@@ -50,20 +54,16 @@ class AdaIN(nn.Module):
         if weight.shape[1] != num_features:
             raise ValueError('Supplied weight vector feature dimension does not match layer definition!')
         self._weight = weight
-
-    @property
-    def weight(self):
-        return self._weight
     
+    @property
+    def bias(self):
+        return self._bias
+
     @bias.setter
     def bias(self, bias):
         if bias.shape[1] != num_features:
             raise ValueError('Supplied bias vector feature dimension does not match layer definition!')
         self._bias = bias
-
-    @property
-    def bias(self):
-        return self._bias
 
     def forward(self, input):
         '''
@@ -98,7 +98,7 @@ class ControllerNet(nn.Module):
             assert (len(hidden_dims) == depth-1)
             dims = [num_input] + hidden_dims + [num_output]
         else:
-            dims = [num_input] + [num_output] * (depth)
+            dims = [num_input] + [num_output] * depth
         for i in range(depth):
             modules.append(nn.BatchNorm1d(dims[i]))
             modules.append(nn.LeakyReLU(negative_slope=self.leakiness))
@@ -115,7 +115,10 @@ class RelativeCoordConv(nn.Module):
     Relative Coordinate Convolution Blocks introduced in AdaptIS paper.
     We tailer to our use (Sparse Tensors). 
 
-    This serves as a prior on the location of the object, as described in the paper.
+    This serves as a prior on the location of the object.
+
+    Original paper contains an "instance size" limiting parameter R,
+    which may not suit our purposes. 
     '''
     def __init__(self, num_input, num_output, data_dim=3, spatial_size=512, leakiness=0.0):
         super(RelativeCoordConv, self).__init__()
@@ -127,8 +130,8 @@ class RelativeCoordConv(nn.Module):
         # CoordConv Block Definition
         self.net = scn.Sequential()
         self.net.add(
-            scn.SubmanifoldConvolution(data_dim, num_input + data_dim, num_output, 3, False))
-            .add(scn.BatchNormLeakyReLU(num_output, leakiness=leakiness))
+            scn.SubmanifoldConvolution(data_dim, num_input + data_dim, num_output, 3, False)).add(
+                scn.BatchNormLeakyReLU(num_output, leakiness=leakiness))
 
 
     def forward(self, input, point):
@@ -202,7 +205,6 @@ class AdaptIS(nn.Module):
                 (self.feature_size if i == 0 else self.segmentation_hidden),
                 self.segmentation_hidden, 3, False)).add(
                 scn.BatchNormLeakyReLU(self.segmentation_hidden, leakiness=self._leakiness))
-            )
             self.segmentation_net.add(module)
         self.segmentation_net.add(scn.NetworkInNetwork(self.attention_hidden, num_classes, False))
 
@@ -290,6 +292,7 @@ class AdaptIS(nn.Module):
                     x = self.instance_dec(x) # Mask features, later apply BCE.
                     instance_masks.append(x)
             else:
+                pass
                 # TODO: Sample attention proposals by local max in attention map. 
         res = {
             'segmentation': [segmentation],
@@ -309,5 +312,9 @@ class ClusteringLoss(nn.Module):
 
 
     def forward(self, out, semantic_labels, group_labels):
+
+        segmentation = out['segmentation'][0]
+        attention = out['attention_map'][0]
+        cluster_masks = out['cluster_masks'][0]
 
         return self._dloss(out, semantic_labels, group_labels)

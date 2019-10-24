@@ -259,11 +259,15 @@ class ClusteringLoss(torch.nn.Module):
 
         self.delta_var = self._cfg.get('delta_var', 0.5)
         self.delta_dist = self._cfg.get('delta_dist', 1.5)
+        num_strides = self._cfg.get('num_strides', 5)
         self.alpha = self._cfg.get('alpha', 0.1)
         self.beta = self._cfg.get('beta', 1.0)
         self.gamma = self._cfg.get('gamma', 0.001)
         self.norm = self._cfg.get('norm', 2)
         self.seg_weight = self._cfg.get('seg_weight', 1.0)
+
+        self._intra_margins = [self.delta_var / 2**i for i in range(num_strides)]
+        self._inter_margins = [self.delta_dist / 2**i for i in range(num_strides)]
 
     def find_cluster_means(self, features, labels):
         '''
@@ -311,6 +315,32 @@ class ClusteringLoss(torch.nn.Module):
             var_loss += l
         var_loss /= n_clusters
         return var_loss
+
+    def attention_weight(self, coords, labels):
+        '''
+        Returns attention weight for intra cluster loss.
+        The weights are defined per voxel by:
+
+        weight(v) = 
+        (1 + exp(-|| coords(v) - coordinate_mean(label(v)) || / spatial_size) / 2)
+
+        Hence, 1 <= weight(v) <= 2, where the weight is larger
+        for points closer to the image space centroid. 
+        '''
+        with torch.no_grad():
+            attention = torch.zeros((coords.shape[0], ))
+            if torch.cuda.is_available():
+                attention = attention.cuda()
+            coord_means = self.find_cluster_means(coords, labels)
+            cluster_labels = labels.unique(sorted=True)
+            for i, c in enumerate(cluster_labels):
+                weight = torch.norm(coords[labels == c] - coord_means[i],
+                                    p=self._cfg['norm'],
+                                    dim=1)
+                weight = (1.0 + torch.exp(-weight)) / 2.0
+                attention[labels == c] = weight
+        return attention
+
 
     def inter_cluster_loss(self, cluster_means, margin=2):
         '''
@@ -382,7 +412,7 @@ class ClusteringLoss(torch.nn.Module):
         return score
 
 
-    def combine(self, features, labels, verbose=True):
+    def combine(self, features, labels, delta_var=0.5, delta_dist=1.5):
         '''
         Wrapper function for combining different components of the loss function.
         Inputs:
@@ -391,8 +421,6 @@ class ClusteringLoss(torch.nn.Module):
         Returns:
             loss: combined loss, in most cases over a given semantic class.
         '''
-        delta_var = self.delta_var
-        delta_dist = self.delta_dist
 
         c_means = self.find_cluster_means(features, labels)
         loss_dist = self.inter_cluster_loss(c_means, margin=delta_dist)
@@ -403,13 +431,10 @@ class ClusteringLoss(torch.nn.Module):
         loss_reg = self.regularization(c_means)
 
         loss = self.alpha * loss_var + self.beta * loss_dist + self.gamma * loss_reg
-        if verbose:
-            return [loss, float(loss_var), float(loss_dist), float(loss_reg)]
-        else:
-            return [loss]
+        return [loss, float(loss_var), float(loss_dist), float(loss_reg)]
 
 
-    def combine_multiclass(self, features, slabels, clabels):
+    def combine_multiclass(self, features, slabels, clabels, delta_var=0.5, delta_dist=1.5):
         '''
         Wrapper function for combining different components of the loss,
         in particular when clustering must be done PER SEMANTIC CLASS.
@@ -432,10 +457,8 @@ class ClusteringLoss(torch.nn.Module):
         for sc in slabels.unique():
             index = (slabels == sc)
             num_clusters = len(clabels[index].unique())
-            # FIXME:
-            # Need faster clustering (maybe switch to DBSCAN?) or faster
-            # estimates of clustering accuracy.
-            loss_blob = self.combine(features[index], clabels[index])
+            loss_blob = self.combine(features[index], clabels[index],
+                                     delta_var=delta_var, delta_dist=delta_dist)
             loss['total_loss'].append(loss_blob[0])
             loss['var_loss'].append(loss_blob[1])
             loss['dist_loss'].append(loss_blob[2])
@@ -445,7 +468,7 @@ class ClusteringLoss(torch.nn.Module):
         return loss, acc_segs
 
 
-    def compute_loss_layer(self, embedding_scn, slabels, clabels, batch_idx):
+    def compute_loss_layer(self, embedding_scn, slabels, clabels, batch_idx, delta_var=0.5, delta_dist=1.5):
         '''
         Compute the multi-class loss for a feature map on a given layer.
         We group the loss computation to a function in order to compute the
@@ -464,19 +487,22 @@ class ClusteringLoss(torch.nn.Module):
         '''
         loss = defaultdict(list)
         acc = defaultdict(list)
-        embedding = embedding_scn.features
+        embedding_unsorted = embedding_scn.features
         coords = embedding_scn.get_spatial_locations().numpy()
         perm = np.lexsort((coords[:, 2], coords[:, 1], coords[:, 0], coords[:, 3]))
+        embedding = embedding_unsorted[perm]
+        coords = coords[perm]
 
         for bidx in batch_idx:
-            index = (slabels[:, 3] == bidx)
-            embedding_batch = embedding[perm][index]
+            index = slabels[:, 3].int() == bidx
+            embedding_batch = embedding[index]
             slabels_batch = slabels[index][:, 4]
             clabels_batch = clabels[index][:, 4]
             # Compute discriminative loss for current event in batch
             if self._cfg['multiclass']:
                 loss_dict, acc_dict = self.combine_multiclass(
-                    embedding_batch, slabels_batch, clabels_batch)
+                    embedding_batch, slabels_batch, clabels_batch,
+                    delta_var=delta_var, delta_dist=delta_dist)
                 for loss_type, loss_list in loss_dict.items():
                     loss[loss_type].append(
                         sum(loss_list) / 5.0)
@@ -534,7 +560,9 @@ class ClusteringLoss(torch.nn.Module):
 
         # Summing loss over layers. Embeddings has to be lexsorted.
         for i, em in enumerate(out['cluster_feature'][0]):
-            loss_i, acc_i = self.compute_loss_layer(em, semantic_labels[0][i], group_labels[0][i], batch_idx)
+            delta_var, delta_dist = self._intra_margins[i], self._inter_margins[i]
+            loss_i, acc_i = self.compute_loss_layer(em, semantic_labels[0][i], group_labels[0][i], batch_idx,
+                                                    delta_var=delta_var, delta_dist=delta_dist)
             for key, val in loss_i.items():
                 loss[key].append(val)
             # Only compute accuracy in last layer.
@@ -559,6 +587,7 @@ class ClusteringLoss(torch.nn.Module):
             "loss": total_loss / batch_size,
             "var_loss": var_loss / batch_size,
             "reg_loss": reg_loss / batch_size,
+            "dist_loss": dist_loss / batch_size,
             "seg_loss": float(loss_seg),
             "acc_0": accuracy[0],
             "acc_1": accuracy[1],
@@ -568,5 +597,7 @@ class ClusteringLoss(torch.nn.Module):
             "acc_seg": accuracy['acc_seg'],
             "accuracy": accuracy['accuracy'] / batch_size
         }
+
+        print(res)
 
         return res
