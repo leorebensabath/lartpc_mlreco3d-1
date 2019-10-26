@@ -242,11 +242,11 @@ class AdaptIS(nn.Module):
 
     def find_query_points(self, attention_map):
         '''
+        TODO:
         Based on attention map, find query points to be passed to 
         AdaIN layers via local maximum finding.
         '''
-        with torch.no_grad():
-            return None
+        pass
 
         
     def forward(self, input, query_points):

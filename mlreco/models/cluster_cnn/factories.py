@@ -1,3 +1,11 @@
+from mlreco.models import uresnet_lonely
+from mlreco.models import uresnet
+from . import clustering_loss
+from . import adaptis
+from . import branchnet
+from . import clusternet
+from . import stacknet
+
 def cluster_model_dict():
     """
     returns dictionary of clustering models
@@ -6,7 +14,8 @@ def cluster_model_dict():
     from . import clusternet
     
     models = {
-        "single" : clusternet.KDENet
+        # UResNet Backbone with Single Layer Loss
+        "clusternet" : clusternet.ClusterUNet
     }
     
     return models

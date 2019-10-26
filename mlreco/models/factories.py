@@ -15,13 +15,7 @@ def model_dict():
     from . import uresnet_clustering
 
     from . import discriminative_loss
-    from . import uresnet_clustering_v2
-    from . import uresnet_clustering_v2_decoder_separate
-    from . import clusternet
-    from . import clusternet_density
-    from . import clusternet_hierarchy
-    from . import clusternet_offset
-    from . import clusternet_adaptis
+    from . import clusterunet_single
 
     # Make some models available (not all of them, e.g. PPN is not standalone)
     models = {
@@ -50,22 +44,10 @@ def model_dict():
         "clust_edge_model": (cluster_edge_gnn.EdgeModel, cluster_edge_gnn.EdgeChannelLoss),
         # direction model
         "clust_dir_model": (cluster_dir_gnn.EdgeModel, cluster_dir_gnn.EdgeChannelLoss),
-        # Clusternet
-        "clusternet": (clusternet.ClusterNet, clusternet.ClusteringLoss),
-        # Clusternet Density
-        "clusternet_density": (clusternet_density.KDENet, clusternet_density.ClusteringLoss),
-        # Clusternet Pyramid
-        "clusternet_hierarchy": (clusternet_hierarchy.HierarchyNet, clusternet_hierarchy.ClusteringLoss),
-        # Clusternet Offset
-        "clusternet_offset": (clusternet_offset.OVRNet, clusternet_offset.OffsetLoss),
-        # Clusternet AdaptIS
-        "clusternet_adaptis": (clusternet_adaptis.AdaptIS, clusternet_adaptis.ClusteringLoss),
+        # ClusterUNet Single
+        "clusterunet_single": (clusterunet_single.ClusterUNet, clusterunet_single.ClusteringLoss),
         # Discriminative Loss
-        "discriminative_loss": (discriminative_loss.UResNet, discriminative_loss.DiscriminativeLoss),
-        # Uresnet Clustering V2
-        "uresnet_clustering_v2": (uresnet_clustering_v2.UResNet, uresnet_clustering_v2.ClusteringLoss),
-        # Uresnet Clustering V2, with Two Decoders
-        "uresnet_clustering_v2_decoder_separate": (uresnet_clustering_v2_decoder_separate.UResNet, uresnet_clustering_v2_decoder_separate.ClusteringLoss)
+        "discriminative_loss": (discriminative_loss.UResNet, discriminative_loss.DiscriminativeLoss)
     }
     # "chain_gnn": (chain_gnn.Chain, chain_gnn.ChainLoss)
     return models
