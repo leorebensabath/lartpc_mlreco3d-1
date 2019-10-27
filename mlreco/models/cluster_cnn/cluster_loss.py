@@ -2,7 +2,9 @@ import torch
 import torch.nn as nn
 import numpy as np
 import sparseconvnet as scn
+
 from collections import defaultdict
+from mlreco.utils.utils import ForwardData
 
 
 class DiscriminativeLoss(torch.nn.Module):
@@ -29,7 +31,7 @@ class DiscriminativeLoss(torch.nn.Module):
 
         self._dimension = self._cfg.get('data_dim', 3)
         self._norm = self._cfg.get('norm', 2)
-        self._seg_contingent = self._cfg.get('contingent', True)
+        self._use_segmentation = self._cfg.get('use_segmentation', True)
 
     def find_cluster_means(self, features, labels):
         '''
@@ -122,7 +124,7 @@ class DiscriminativeLoss(torch.nn.Module):
         reg_loss /= float(n_clusters)
         return reg_loss
 
-    def compute_heuristic_accuracy(self, embedding, truth, bandwidth=0.5):
+    def compute_heuristic_accuracy(self, embedding, truth):
         '''
         Compute Adjusted Rand Index Score for given embedding coordinates,
         where predicted cluster labels are obtained from distance to closest
@@ -166,7 +168,7 @@ class DiscriminativeLoss(torch.nn.Module):
         delta_dist = kwargs.get('inter_margin', 1.5)
         intra_weight = kwargs.get('intra_weight', 1.0)
         inter_weight = kwargs.get('inter_weight', 1.0)
-        reg_weight = kwargs.get('reg_weight', 1.0)
+        reg_weight = kwargs.get('reg_weight', 0.001)
 
         c_means = self.find_cluster_means(features, labels)
         inter_loss = self.inter_cluster_loss(c_means, margin=delta_var)
@@ -176,13 +178,14 @@ class DiscriminativeLoss(torch.nn.Module):
                                            margin=delta_dist)
         reg_loss = self.regularization(c_means)
 
-        loss = intra_weight * loss_var + inter_weight * loss_dist + reg_weight * loss_reg
+        loss = intra_weight * intra_loss + inter_weight \
+            * inter_loss + reg_weight * reg_loss
 
         return {
             'total_loss': loss, 
-            'var_loss': float(intra_loss),
-            'dist_loss': float(inter_loss),
-            'reg_loss': float(reg_loss)
+            'var_loss': intra_weight * float(intra_loss),
+            'dist_loss': inter_weight * float(inter_loss),
+            'reg_loss': reg_weight * float(reg_loss)
         }
 
 
@@ -248,7 +251,7 @@ class DiscriminativeLoss(torch.nn.Module):
                 slabels_batch = slabels[batch_idx == bidx]
                 clabels_batch = clabels[batch_idx == bidx]
 
-                if not self._seg_contingent:
+                if self._use_segmentation:
                     loss_dict, acc_segs = self.combine_multiclass(
                         embedding_batch, slabels_batch, clabels_batch, **self.loss_hyperparams)
                     loss["total_loss"].append(
@@ -272,7 +275,7 @@ class DiscriminativeLoss(torch.nn.Module):
         reg_loss = sum(loss["reg_loss"]) / (nbatch * num_gpus)
         acc_segs = defaultdict(float)
         acc_avg = []
-        for i in range(self.num_classes):
+        for i in range(self._num_classes):
             if accuracy[i]:
                 acc_segs[i] = sum(accuracy[i]) / float(len(accuracy[i]))
                 acc_avg.append(acc_segs[i])
@@ -280,8 +283,7 @@ class DiscriminativeLoss(torch.nn.Module):
                 acc_segs[i] = 0.0
         acc_avg = sum(acc_avg) / float(len(acc_avg))
 
-
-        return {
+        res = {
             "loss": total_loss,
             "var_loss": var_loss,
             "dist_loss": dist_loss,
@@ -294,11 +296,13 @@ class DiscriminativeLoss(torch.nn.Module):
             "acc_4": acc_segs[4]
         }
 
+        return res
+
 
 class MultiScaleLoss(DiscriminativeLoss):
 
-    def __init__(self, cfg):
-        super(MultiScaleLoss, self).__init__()
+    def __init__(self, cfg, name='clustering_loss'):
+        super(MultiScaleLoss, self).__init__(cfg)
         self._cfg = cfg['modules']['clustering_loss']
         self._num_strides = self._cfg.get('num_strides', 5)
 
@@ -326,7 +330,8 @@ class MultiScaleLoss(DiscriminativeLoss):
                 to calculated loss over a given layer.
         '''
         loss = defaultdict(list)
-        acc = defaultdict(list)
+        accuracy = defaultdict(list)
+
         coords = embedding_scn.get_spatial_locations().numpy()
         perm = np.lexsort((coords[:, 2], coords[:, 1], coords[:, 0], coords[:, 3]))
         embedding = embedding_scn.features[perm]
@@ -338,7 +343,7 @@ class MultiScaleLoss(DiscriminativeLoss):
             slabels_batch = slabels[index][:, -1]
             clabels_batch = clabels[index][:, -1]
             # Compute discriminative loss for current event in batch
-            if not self._seg_contingent:
+            if self._use_segmentation:
                 loss_dict, acc_segs = self.combine_multiclass(
                     embedding_batch, slabels_batch, clabels_batch, **kwargs)
                 loss["total_loss"].append(
@@ -353,11 +358,11 @@ class MultiScaleLoss(DiscriminativeLoss):
                     accuracy[s].append(acc)
             else:
                 loss["total_loss"].append(self.combine(embedding_batch, clabels_batch, **kwargs))
-                acc, _ = self.compute_heuristic_accuracy(embedding_batch, clabels_batch)
+                acc = self.compute_heuristic_accuracy(embedding_batch, clabels_batch)
                 accuracy.append(acc)
 
         summed_loss = { key : sum(l) for key, l in loss.items() }
-        averaged_acc = { key : sum(l) / float(len(l)) for key, l in acc.items() }
+        averaged_acc = { key : sum(l) / float(len(l)) for key, l in accuracy.items() }
         return summed_loss, averaged_acc
 
 
@@ -376,16 +381,13 @@ class MultiScaleLoss(DiscriminativeLoss):
 
         loss = defaultdict(list)
         accuracy = defaultdict(float)
+
         for i_gpu in range(len(semantic_labels)):
-            batch_idx = semantic_labels[i][0][:, 3].detach().cpu().int().numpy()
+            batch_idx = semantic_labels[i_gpu][0][:, 3].detach().cpu().int().numpy()
             batch_idx = np.unique(batch_idx)
             batch_size = len(batch_idx)
-            # Compute segmentation loss at final layer. 
-            loss_seg, acc_seg = self.compute_segmentation_loss(out['segmentation'][i_gpu], semantic_labels[i_gpu][0], batch_idx)
-            loss['total_loss'].append(loss_seg)
-
             # Summing clustering loss over layers.
-            for i, em in enumerate(out['cluster_feature'][i]):
+            for i, em in enumerate(out['cluster_feature'][i_gpu]):
                 delta_var, delta_dist = self._intra_margins[i], self._inter_margins[i]
                 loss_i, acc_i = self.compute_loss_layer(em, semantic_labels[i_gpu][i], group_labels[i_gpu][i], batch_idx,
                                                         delta_var=delta_var, delta_dist=delta_dist)
@@ -405,8 +407,6 @@ class MultiScaleLoss(DiscriminativeLoss):
         total_acc = 0
         for acc in accuracy.values():
             total_acc += acc / len(accuracy.keys())
-
-        accuracy['acc_seg'] = float(acc_seg)
         accuracy['accuracy'] = total_acc
 
         res = {
@@ -414,13 +414,11 @@ class MultiScaleLoss(DiscriminativeLoss):
             "var_loss": var_loss / batch_size,
             "reg_loss": reg_loss / batch_size,
             "dist_loss": dist_loss / batch_size,
-            "seg_loss": float(loss_seg),
             "acc_0": accuracy[0],
             "acc_1": accuracy[1],
             "acc_2": accuracy[2],
             "acc_3": accuracy[3],
             "acc_4": accuracy[4],
-            "acc_seg": accuracy['acc_seg'],
             "accuracy": accuracy['accuracy'] / batch_size
         }
 
@@ -430,37 +428,40 @@ class MultiScaleLoss(DiscriminativeLoss):
 class AllyEnemyLoss(MultiScaleLoss):
 
     def __init__(self, cfg):
-        super(AllyEnemyLoss, self).__init__()
-        self._cfg = cfg['modules']['clustering_loss']
+        super(AllyEnemyLoss, self).__init__(cfg)
+        self.model_config = cfg['modules']['clustering_loss']
 
         # Huber Loss for Team Loss
         self.huber_loss = torch.nn.SmoothL1Loss(reduction='mean')
 
         # Density Loss Parameters
-        self._density_estimate = self._cfg.get('density_estimate', False)
-        self._density_estimate_weight = self._cfg.get('density_estimate_weight', 0.01)
-        self._density_weightF = 1. # Relative Weight between friend/enemy
-        self._density_weightE = 1.
-        # Target Proportion of Friends
-        self._targetF = self._cfg.get('target_friends', 0.5)
-        # Target Proportion of Enemies
-        self._targetE = self._cfg.get('target_enemies', 1.5)
+        self.estimate_teams = self.model_config.get('estimate_teams', False)
+        self.ally_est_weight = self.model_config.get('ally_est_weight', 1.0)
+        self.enemy_est_weight = self.model_config.get('enemy_est_weight', 1.0)
+
+        # Minimum Required Distance^2 to Closest Ally
+        self.targetAlly = self.model_config.get('target_friends', 0.1)
+        # Maximum Required Distance^2 to Closest Enemy
+        self.targetEnemy = self.model_config.get('target_enemies', 10.0)
+        self.ally_weight = self.model_config.get('ally_weight', 1.0)
+        self.enemy_weight = self.model_config.get('enemy_weight', 1.0)
+        self.affinity_weight = self.model_config.get('affinity_weight', 1.0)
+        self.clustering_weight = self.model_config.get('clustering_weight', 1.0)
 
 
-    def distance_matrix(self, points):
+    def similarity_matrix(self, points):
         """
         Uses BLAS/LAPACK operations to efficiently compute pairwise distances.
         """
-        M = points
-        transpose  = M.permute([0, 2, 1])
+        M = points[None,...]
         zeros = torch.zeros(1, 1, 1)
         if torch.cuda.is_available():
             zeros = zeros.cuda()
-        inner_prod = torch.baddbmm(zeros, M, transpose, alpha=-2.0, beta=0.0)
+        inner_prod = torch.baddbmm(zeros, M, M.permute([0, 2, 1]), alpha=-2.0, beta=0.0)
         squared    = torch.sum(torch.mul(M, M), dim=-1, keepdim=True)
-        squared_tranpose = squared.permute([0, 2, 1])
         inner_prod += squared
-        inner_prod += squared_tranpose
+        inner_prod += squared.permute([0, 2, 1])
+        return inner_prod
 
 
     def compute_team_loss(self, embedding_class, cluster_class):
@@ -478,145 +479,120 @@ class AllyEnemyLoss(MultiScaleLoss):
             - dlossE (dict of floats): dictionary of enemy loss.
             - dloss_map (torch.Tensor): computed ally/enemy affinity for each voxel. 
         """
-        dloss_map = torch.zeros((embedding_class.shape[0], 2 * len(self._radii))).cuda()
-        loss = 0
-        dlossF = defaultdict(list)
-        dlossE = defaultdict(list)
-        n = embedding_class.shape[1]
-        dist = self.distance_matrix(embedding_class[None,...][..., :3]).squeeze(0)
-
-        cluster_ids = cluster_class.unique()
+        loss = 0.0
+        ally_loss, enemy_loss = 0.0, 0.0
+        dist = self.similarity_matrix(embedding_class).squeeze(0)
+        cluster_ids = cluster_class.unique().int()
+        num_clusters = float(cluster_ids.shape[0])
         for c in cluster_ids:
-            index = cluster_class == c
-            embedding_instance = embedding_class[index]
-            for j, r in enumerate(self._radii):
-                dist_voxel = dist[index, :]
-                friends = dist_voxel[:, index].min(dim=1)
-                enemies = dist_voxel[:, ~index].min(dim=1)
-                dloss_map[index, 2 * j] = friends
-                dloss_map[index, 2 * j + 1] = enemies
-                lossF = torch.mean(torch.clamp(self._targetF[j] - friends, min=0))
-                lossE = torch.mean(torch.clamp(enemies - self._targetE[j], min=0))
-                loss += self._density_weightF * lossF
-                loss += self._density_weightE * lossE
-                dlossF[j].append(float(lossF))
-                dlossE[j].append(float(lossE))
-        #loss /= len(cluster_ids)
-        for key, val in dlossF.items():
-            dlossF[key] = sum(val) / len(cluster_ids) * len(self._radii)
-        for key, val in dlossE.items():
-            dlossE[key] = sum(val) / len(cluster_ids) * len(self._radii)
-        loss /= len(cluster_ids) * len(self._radii)
-        return loss, dlossF, dlossE, dloss_map
+            index = cluster_class.int() == c
+            allies = dist[index, :][:, index]
+            num_allies = allies.shape[0]
+            if num_allies <= 1:
+                # Skip if only one point
+                continue
+            ind = np.diag_indices(num_allies)
+            allies[ind[0], ind[1]] = float('inf')
+            allies, _ = torch.min(allies, dim=1)
+            lossA = self.ally_weight *  torch.mean(
+                torch.clamp(allies - self.targetAlly, min=0))
+            loss += lossA
+            ally_loss += float(lossA)
+            del lossA
+            if index.all(): 
+                # Skip if there are no enemies
+                continue
+            enemies, _ = torch.min(dist[index, :][:, ~index], dim=1)
+            lossE = self.enemy_weight * torch.mean(
+                torch.clamp(self.targetEnemy - enemies, min=0))
+            loss += lossE
+            enemy_loss += float(lossE)
+            del lossE
+        
+        loss /= num_clusters
+        ally_loss /= num_clusters
+        enemy_loss /= num_clusters
+        return loss, ally_loss, enemy_loss
 
 
     def forward(self, result, segment_label, cluster_label):
         '''
         Mostly borrowed from uresnet_clustering.py
         '''
-        seg_loss, seg_acc = 0., 0.
-        intracluster_loss = []
-        intercluster_loss = []
-        reg_loss = []
-        real_distance_loss = []
-
-        clustering_loss = []
-        intracluster_loss_per_class = defaultdict(list)
-        intercluster_loss_per_class = defaultdict(list)
-        reg_loss_per_class = defaultdict(list)
-        clustering_loss_per_class = defaultdict(list)
-
-        density_lossF_estimate, density_lossF_target = defaultdict(list), defaultdict(list)
-        density_lossE_estimate, density_lossE_target = defaultdict(list), defaultdict(list)
-        density_estimate_loss_combined = []
-
-        accuracy = []
-
-        # Segmentation Loss
-        seg_loss, acc_seg = self.compute_segmentation_loss(result['segmentation'][0], 
-            segment_label[0][0])
+        data = ForwardData()
+        num_gpus = len(segment_label)
+        loss = 0.0
 
         # Loop first over scaled feature maps
-        for depth in range(self._depth):
+        for i_gpu in range(num_gpus):
+            for depth in range(self._depth):
 
-            batch_ids = segment_label[0][depth][:, 3].detach().cpu().int().numpy()
-            batch_ids = np.unique(batch_ids)
-            batch_size = len(batch_ids)
+                batch_ids = segment_label[i_gpu][depth][:, 3].detach().cpu().int().numpy()
+                batch_ids = np.unique(batch_ids)
+                batch_size = len(batch_ids)
 
-            embedding = result['cluster_feature'][0][depth]
-            density_depth = result['density_feature'][0][depth]
-            clabels_depth = cluster_label[0][depth]
-            slabels_depth = segment_label[0][depth]
+                embedding = result['cluster_feature'][i_gpu][depth]
+                clabels_depth = cluster_label[i_gpu][depth]
+                slabels_depth = segment_label[i_gpu][depth]
 
-            coords = embedding.get_spatial_locations()[:, :4]
-            perm = np.lexsort((coords[:, 2], coords[:, 1], coords[:, 0], coords[:, 3]))
-            coords = coords[perm]
-            feature_map = embedding.features[perm]
-            if self._density_estimate:
-                density_map = density_depth.features[perm]
+                coords = embedding.get_spatial_locations()[:, :4]
+                perm = np.lexsort((coords[:, 2], coords[:, 1], coords[:, 0], coords[:, 3]))
+                coords = coords[perm]
+                feature_map = embedding.features[perm]
 
-            for bidx in batch_ids:
-                batch_mask = coords[:, 3] == bidx
-                hypercoordinates = feature_map[batch_mask]
-                slabels_event = slabels_depth[batch_mask]
-                clabels_event = clabels_depth[batch_mask]
-                coords_event = coords[batch_mask]
+                for bidx in batch_ids:
+                    batch_mask = coords[:, 3] == bidx
+                    hypercoordinates = feature_map[batch_mask]
+                    slabels_event = slabels_depth[batch_mask]
+                    clabels_event = clabels_depth[batch_mask]
+                    coords_event = coords[batch_mask]
 
-                # Loop over semantic labels:
-                semantic_classes = slabels_event[:, -1].unique()
-                n_classes = len(semantic_classes)
-                for class_ in semantic_classes:
-                    class_mask = slabels_event[:, -1] == class_
-                    # Clustering Loss
-                    embedding_class = hypercoordinates[class_mask]
-                    cluster_class = clabels_event[class_mask]
-                    coords_class = coords_event[class_mask]
-                    closs, loss_components, cmeans = self.combine(embedding_class, cluster_class[:, -1])
-                    clustering_loss_per_class[class_].append(float(closs))
-                    intracluster_loss_per_class[class_].append(loss_components[0])
-                    intracluster_loss.append(loss_components[0])
-                    intercluster_loss_per_class[class_].append(loss_components[1])
-                    intercluster_loss.append(loss_components[1])
-                    reg_loss_per_class[class_].append(loss_components[2])
-                    reg_loss.append(loss_components[2])
-                    # Density Loss
-                    dloss, dlossF, dlossE, dloss_map = self.compute_team_loss(embedding_class, cluster_class[:, -1])
-                    for key, val in dlossF.items():
-                        density_lossF_target[key].append(val)
-                    for key, val in dlossE.items():
-                        density_lossE_target[key].append(val)
+                    # Loop over semantic labels:
+                    semantic_classes = slabels_event[:, -1].unique()
+                    n_classes = len(semantic_classes)
+                    for class_ in semantic_classes:
+                        class_mask = slabels_event[:, -1] == class_
+                        # Clustering Loss
+                        embedding_class = hypercoordinates[class_mask]
+                        cluster_class = clabels_event[class_mask]
+                        acc = self.compute_heuristic_accuracy(embedding_class, cluster_class[:, -1])
+                        closs = self.combine(embedding_class, cluster_class[:, -1])
+                        dloss, dlossF, dlossE = self.compute_team_loss(embedding_class, cluster_class[:, -1])
 
-                    if self._density_estimate:
-                        density_estimate_loss = self.huber_loss(density_map[batch_mask][class_mask],
-                                                             dloss_map)
-                        density_estimate_loss_combined.append(density_estimate_loss)
-                    clustering_loss.append(closs)
+                        # Informations to be saved in log file (loss/accuracy). 
+                        data.update_mean('accuracy', acc)
+                        data.update_mean('intra_loss', closs['var_loss'])
+                        data.update_mean('inter_loss', closs['dist_loss'])
+                        data.update_mean('reg_loss', closs['reg_loss'])
+                        data.update_mean('ally_loss', dlossF)
+                        data.update_mean('enemy_loss', dlossE)
+                        data.update_mean('loss', self.clustering_weight * \
+                            closs['total_loss'] + self.affinity_weight * dloss)
 
-        clustering_loss = sum(clustering_loss) / len(clustering_loss)
-
-        total_loss = 0.0
-        total_loss += self._segmentation_weight * seg_loss
-        total_loss += self._clustering_weight * clustering_loss
-
-        res = {
-            'accuracy': float(acc_seg),
-            'seg_loss': float(seg_loss),
-            'seg_acc': float(acc_seg),
-            'intracluster_loss': sum(intracluster_loss) / len(intracluster_loss),
-            'intercluster_loss': sum(intercluster_loss) / len(intercluster_loss),
-            'reg_loss': sum(reg_loss) / len(reg_loss),
-            'clustering_loss': float(clustering_loss)
-        }
-
-        if self._density_estimate:
-            density_estimate_loss_combined = sum(density_estimate_loss_combined) \
-                / len(density_estimate_loss_combined)
-            total_loss += density_estimate_loss_combined * self._density_estimate_weight
-            res['density_estimate_loss'] = density_estimate_loss_combined * self._density_estimate_weight
-
-        res['loss'] = total_loss
+        res = data.as_dict()
+        print(res)
 
         return res
+
+
+class StackNetLoss(nn.Module):
+
+    def __init__(self, cfg, name='stacknet_loss'):
+        self.model_config = cfg['modules'][name]
+        self.multiScale = self.model_config.get('multi_scale', False)
+        self.loss_funcs = {}
+        self.loss_funcs['single'] = DiscriminativeLoss(cfg)
+        if self.multi_scale:
+            self.loss_funcs['multi'] = MultiScaleLoss(cfg)
+        self.final_layer_weight = self.model_config.get('final_layer_weight', 1.0)
+        
+
+    def forward(self, result, segment_label, cluster_label):
+
+        res_final = self.loss_funcs['single'](result)
+        
+
+
 
 
 # TODO:

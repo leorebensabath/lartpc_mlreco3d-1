@@ -40,9 +40,11 @@ class UResNet(NetworkBase):
         self.reps = self.model_config.get('reps', 2)  # Conv block repetition factor
         self.kernel_size = self.model_config.get('kernel_size', 2)
         self.num_strides = self.model_config.get('num_strides', 5)
-        self.num_filters = self.model_config.get('filters', 16)  # Unet number of features
-        self.nPlanes = [i*m for i in range(1, num_strides+1)]  # UNet number of features per level
-        self.downsample = [kernel_size, 2]  # [filter size, filter stride]
+        # Unet number of features
+        self.num_filters = self.model_config.get('filters', 16)
+        # UNet number of features per level
+        self.nPlanes = [i*self.num_filters for i in range(1, self.num_strides+1)]
+        self.downsample = [self.kernel_size, 2]  # [filter size, filter stride]
         self.inputKernel = self.model_config.get('input_kernel_size', 3)
 
         # Input Layer Configurations and commonly used scn operations. 
@@ -81,7 +83,7 @@ class UResNet(NetworkBase):
             m = scn.Sequential()
             for j in range(self.reps):
                 self._resnet_block(m, self.nPlanes[i] * (2 if j == 0 else 1), self.nPlanes[i])
-            self.decoding_blocks.add(m)
+            self.decoding_block.add(m)
 
 
     def encoder(self, x):
@@ -102,10 +104,17 @@ class UResNet(NetworkBase):
             x = self.encoding_block[i](x)
             features_enc.append(x)
             x = self.encoding_conv[i](x)
-        return features_enc
+        
+        res = {
+            "features_enc": features_enc,
+            "deepest_layer": x
+        }
+
+        return res
+    
 
 
-    def decoder(self, features_enc):
+    def decoder(self, features_enc, deepest_layer):
         '''
         Vanilla UResNet Decoder
 
@@ -117,11 +126,12 @@ class UResNet(NetworkBase):
             tensors in decoding path at each spatial resolution. 
         '''
         features_dec = []
+        x = deepest_layer
         for i, layer in enumerate(self.decoding_conv):
             encoder_feature = features_enc[-i-2]
             x = layer(x)
             x = self.concat([encoder_feature, x])
-            x = self.decoding_blocks[i](x)
+            x = self.decoding_block[i](x)
             features_dec.append(x)
         return features_dec
 
@@ -142,8 +152,10 @@ class UResNet(NetworkBase):
         features = point_cloud[:, self.dimension+1:].float()
 
         x = self.input((coords, features))
-        features_enc = self.encoder(x)
-        features_dec = self.decoder(features_enc)
+        encoder_res = self.encoder(x)
+        features_enc = encoder_res['features_enc']
+        deepest_layer = encoder_res['deepest_layer']
+        features_dec = self.decoder(features_enc, deepest_layer)
 
         res = {
             "features_enc": [features_enc],

@@ -2,13 +2,13 @@ import torch
 import torch.nn as nn
 import numpy as np
 import sparseconvnet as scn
-from collections import defaultdict
 
 from .cluster_cnn.utils import add_normalized_coordinates
-from .cluster_cnn.loss import DiscriminativeLoss
+from .cluster_cnn.cluster_loss import DiscriminativeLoss
 from mlreco.models.uresnet import UResNet
 
-class ClusterUNet(UResNet):
+
+class ClusterCNN(UResNet):
     '''
     Clustering model with UResNet Backbone, where we optimize
     the network with a discriminative loss function for clustering.
@@ -16,10 +16,11 @@ class ClusterUNet(UResNet):
     Loss is applied only at the final layer that represents the
     learned embedding space.
     '''
-    def __init__(self, cfg, name='clusterunet_single'):
-        super(ClusterUNet, self).__init__(cfg, name='uresnet')
-        self._coordConv = self.model_config.get('coordConv', False)
-        self._embedding_dim = self.model_config.get('embedding_dim', 8)
+    def __init__(self, cfg, name='clusterunet'):
+        super(ClusterCNN, self).__init__(cfg, name)
+        self._coordConv = self._model_config.get('coordConv', False)
+        self._embedding_dim = self._model_config.get('embedding_dim', 8)
+        m = self._model_config.get('filters', 16)
         if self._coordConv:
             self.linear = torch.nn.Linear(m + self._dimension, self._embedding_dim)
         else:
@@ -52,7 +53,8 @@ class ClusterUNet(UResNet):
 
 class ClusteringLoss(DiscriminativeLoss):
 
-    def __init__(self, cfg, name='cluster_single_loss'):
+    def __init__(self, cfg, name='clustering_loss'):
         super(ClusteringLoss, self).__init__(cfg)
+
 
     

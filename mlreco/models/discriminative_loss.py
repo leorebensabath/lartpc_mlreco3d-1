@@ -277,7 +277,7 @@ class DiscriminativeLoss(torch.nn.Module):
         slabels = slabels.type(torch.LongTensor)
         clabels = group_labels[0][:, 4]
         batch_idx = semantic_labels[0][:, 3]
-        embedding = out['cluster_features'][0]
+        embedding = out['cluster_feature'][0]
         loss = defaultdict(list)
         accuracy = defaultdict(list)
         nbatch = int(batch_idx.unique().shape[0])

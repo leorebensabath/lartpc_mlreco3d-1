@@ -15,7 +15,8 @@ def model_dict():
     from . import uresnet_clustering
 
     from . import discriminative_loss
-    from . import clusterunet_single
+    from . import clustercnn_single
+    from . import clustercnn
 
     # Make some models available (not all of them, e.g. PPN is not standalone)
     models = {
@@ -45,9 +46,11 @@ def model_dict():
         # direction model
         "clust_dir_model": (cluster_dir_gnn.EdgeModel, cluster_dir_gnn.EdgeChannelLoss),
         # ClusterUNet Single
-        "clusterunet_single": (clusterunet_single.ClusterUNet, clusterunet_single.ClusteringLoss),
-        # Discriminative Loss
-        "discriminative_loss": (discriminative_loss.UResNet, discriminative_loss.DiscriminativeLoss)
+        "clusterunet_single": (clustercnn_single.ClusterCNN, clustercnn_single.ClusteringLoss),
+        # Same as ClusterUNet Single, but coordinate concat is done in first input layer.
+        "discriminative_loss": (discriminative_loss.UResNet, discriminative_loss.DiscriminativeLoss),
+        # ClusterUNet Multi
+        "clusterunet": (clustercnn.ClusterCNN, clustercnn.ClusteringLoss),
     }
     # "chain_gnn": (chain_gnn.Chain, chain_gnn.ChainLoss)
     return models

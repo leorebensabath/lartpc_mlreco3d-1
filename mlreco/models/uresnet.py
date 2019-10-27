@@ -5,10 +5,10 @@ import torch
 
 
 class UResNet(torch.nn.Module):
-    def __init__(self, cfg):
+    def __init__(self, cfg, name='uresnet'):
         import sparseconvnet as scn
         super(UResNet, self).__init__()
-        self._model_config = cfg['modules']['uresnet']
+        self._model_config = cfg['modules'][name]
 
         self._dimension = self._model_config.get('data_dim', 3)
         num_strides = self._model_config.get('num_strides', 5)
