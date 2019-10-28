@@ -10,11 +10,12 @@ from mlreco.models.uresnet import UResNet
 
 class ClusterCNN(UResNet):
     '''
-    Clustering model with UResNet Backbone, where we optimize
-    the network with a discriminative loss function for clustering.
+    UResNet with coordinate convolution block in final layer for clustering.
 
-    Loss is applied only at the final layer that represents the
-    learned embedding space.
+    Congifurations:
+        - coordConv: Option to concat coordinates to input features at
+        final linear layer. 
+        - embedding_dim: dimension of final embedding space for clustering. 
     '''
     def __init__(self, cfg, name='clusterunet'):
         super(ClusterCNN, self).__init__(cfg, name)
@@ -52,9 +53,8 @@ class ClusterCNN(UResNet):
 
 
 class ClusteringLoss(DiscriminativeLoss):
-
+    '''
+    Vanilla discriminative clustering loss applied to final embedding layer.
+    '''
     def __init__(self, cfg, name='clustering_loss'):
         super(ClusteringLoss, self).__init__(cfg)
-
-
-    

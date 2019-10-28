@@ -48,11 +48,13 @@ class AdaIN(nn.Module):
     @weight.setter
     def weight(self, weight):
         '''
-        Set weight and bias parameters for AdaIN Layer. Note that in AdaptIS, the
-        parameters to the AdaIN layer are trainable outputs from the controller network. 
+        Set weight and bias parameters for AdaIN Layer. 
+        Note that in AdaptIS, the parameters to the AdaIN layer
+        are trainable outputs from the controller network. 
         '''
         if weight.shape[1] != num_features:
-            raise ValueError('Supplied weight vector feature dimension does not match layer definition!')
+            raise ValueError('Supplied weight vector feature dimension\
+             does not match layer definition!')
         self._weight = weight
     
     @property
@@ -62,7 +64,8 @@ class AdaIN(nn.Module):
     @bias.setter
     def bias(self, bias):
         if bias.shape[1] != num_features:
-            raise ValueError('Supplied bias vector feature dimension does not match layer definition!')
+            raise ValueError('Supplied bias vector feature dimension\
+             does not match layer definition!')
         self._bias = bias
 
     def forward(self, input):

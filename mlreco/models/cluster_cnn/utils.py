@@ -28,3 +28,26 @@ def add_normalized_coordinates(input):
     output.metadata = input.metadata
     output.spatial_size = input.spatial_size
     return output
+
+
+def distance_matrix(points):
+    """
+    Uses BLAS/LAPACK operations to efficiently compute pairwise distances.
+    
+    INPUTS:
+        - points (N x d Tensor): torch.Tensor with each row 
+        corresponding to a point in vector space.
+
+    RETURNS:
+        - inner_prod (N x N Tensor): computed pairwise distance
+        matrix squared.
+    """
+    M = points[None,...]
+    zeros = torch.zeros(1, 1, 1)
+    if torch.cuda.is_available():
+        zeros = zeros.cuda()
+    inner_prod = torch.baddbmm(zeros, M, M.permute([0, 2, 1]), alpha=-2.0, beta=0.0)
+    squared    = torch.sum(torch.mul(M, M), dim=-1, keepdim=True)
+    inner_prod += squared
+    inner_prod += squared.permute([0, 2, 1])
+    return inner_prod.squeeze(0)

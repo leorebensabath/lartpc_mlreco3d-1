@@ -95,7 +95,7 @@ class stopwatch(object):
 # Dumb class to organize loss/accuracy computations in forward loop. 
 class ForwardData:
     '''
-    Not to use it for accumulating losses for backpropagation. 
+    Utility class for computing averages of loss and accuracies.
     '''
     def __init__(self):
         from collections import defaultdict
@@ -110,6 +110,10 @@ class ForwardData:
             / float((self.counts[name] + 1))
         self.means[name] = mean
         self.counts[name] += 1
+
+    def update_dict(self, d):
+        for name, value in d.items():
+            self.update_mean(name, value)
 
     def as_dict(self):
         return self.means

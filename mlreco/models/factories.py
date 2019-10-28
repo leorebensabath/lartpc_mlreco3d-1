@@ -16,7 +16,8 @@ def model_dict():
 
     from . import discriminative_loss
     from . import clustercnn_single
-    from . import clustercnn
+    from . import clustercnn_neighbors
+    from . import clustercnn_stable
 
     # Make some models available (not all of them, e.g. PPN is not standalone)
     models = {
@@ -49,8 +50,10 @@ def model_dict():
         "clusterunet_single": (clustercnn_single.ClusterCNN, clustercnn_single.ClusteringLoss),
         # Same as ClusterUNet Single, but coordinate concat is done in first input layer.
         "discriminative_loss": (discriminative_loss.UResNet, discriminative_loss.DiscriminativeLoss),
-        # ClusterUNet Multi
-        "clusterunet": (clustercnn.ClusterCNN, clustercnn.ClusteringLoss),
+        # ClusterUNet Affinity (NOTE: Unstable training due to GPU memory issues)
+        "clusterunet_affinity": (clustercnn_neighbors.ClusterCNN, clustercnn_neighbors.ClusteringLoss),
+        # ClusterUNet Stable (Multiscale loss with attention weighting and voxel-centroid push loss)
+        "clusterunet": (clustercnn_stable.ClusterCNN, clustercnn_stable.ClusteringLoss),
     }
     # "chain_gnn": (chain_gnn.Chain, chain_gnn.ChainLoss)
     return models
