@@ -5,6 +5,7 @@ import sparseconvnet as scn
 from collections import defaultdict
 
 from mlreco.models.layers.uresnet import UResNet
+from .utils import add_normalized_coordinates
 
 
 class ClusterUNet(UResNet):
@@ -35,13 +36,13 @@ class ClusterUNet(UResNet):
             Dimension of clustering hyperspace.
         '''
         super(ClusterUNet, self).__init__(cfg, name='clusterunet')
-        self._num_classes = self.model_config.get('num_classes', 5)
-        self._N = self.model_config.get('N', 1)
-        self._simpleN = self.model_config.get('simple_conv', False)
-        self._embedding_dim = self.model_config.get('embedding_dim', 8)
-        self._coordConv = self.model_config.get('coordConv', False)
+        self.num_classes = self.model_config.get('num_classes', 5)
+        self.N = self.model_config.get('N', 1)
+        self.simpleN = self.model_config.get('simple_conv', False)
+        self.embedding_dim = self.model_config.get('embedding_dim', 8)
+        self.coordConv = self.model_config.get('coordConv', False)
 
-        if self._simpleN:
+        if self.simpleN:
             clusterBlock = self._block
         else:
             clusterBlock = self._resnet_block
@@ -58,18 +59,18 @@ class ClusterUNet(UResNet):
                         self.downsample[0], self.downsample[1], self.allow_bias))
                 self.cluster_conv.add(m)
             m = scn.Sequential()
-            for j in range(self._N):
+            for j in range(self.N):
                 num_input = fDim
                 if i > 0 and j == 0:
                     num_input *= 2
-                if self._coordConv:
-                    num_input += self._dimension
+                if self.coordConv and j == 0:
+                    num_input += self.dimension
                 clusterBlock(m, num_input, fDim)
             self.cluster_transform.add(m)
 
         # NetworkInNetwork layer for final embedding space. 
         self.embedding = scn.NetworkInNetwork(
-            self.num_filters, self._embedding_dim, self.allow_bias)
+            self.num_filters, self.embedding_dim, self.allow_bias)
 
 
     def decoder(self, features_enc, deepest_layer):
@@ -92,6 +93,8 @@ class ClusterUNet(UResNet):
         x_emb = deepest_layer
         for i, layer in enumerate(self.decoding_conv):
             encoder_feature = features_enc[-i-2]
+            if self.coordConv:
+                x_emb = add_normalized_coordinates(x_emb)
             x_emb = self.cluster_transform[i](x_emb)
             cluster_feature.append(x_emb)
             x_emb = self.cluster_conv[i](x_emb)
@@ -101,6 +104,8 @@ class ClusterUNet(UResNet):
             features_dec.append(x_seg)
             x_emb = self.concat([x_emb, x_seg])
         # Compensate for last clustering convolution
+        if self.coordConv:
+            x_emb = add_normalized_coordinates(x_emb)
         x_emb = self.cluster_transform[-1](x_emb)
         x_emb = self.embedding(x_emb)
         cluster_feature.append(x_emb)

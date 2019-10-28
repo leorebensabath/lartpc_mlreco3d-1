@@ -4,7 +4,7 @@ import numpy as np
 import sparseconvnet as scn
 
 
-def add_normalized_coordinates(self, input):
+def add_normalized_coordinates(input):
     '''
     Utility Method for attaching normalized coordinates to
     sparse tensor features.
@@ -19,9 +19,11 @@ def add_normalized_coordinates(self, input):
     '''
     output = scn.SparseConvNetTensor()
     with torch.no_grad():
-        coords = input.get_spatial_locations()
-        normalized_coords = (coords[:, :3] - input.spatial_size / 2) \
-            / float(input.spatial_size)
+        coords = input.get_spatial_locations().float()
+        normalized_coords = (coords[:, :3] - input.spatial_size.float() / 2) \
+            / (input.spatial_size.float() / 2)
+        if torch.cuda.is_available():
+            normalized_coords = normalized_coords.cuda()
         output.features = torch.cat([normalized_coords, input.features], dim=1)
     output.metadata = input.metadata
     output.spatial_size = input.spatial_size
