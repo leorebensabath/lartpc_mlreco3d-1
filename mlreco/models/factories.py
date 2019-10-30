@@ -18,6 +18,9 @@ def model_dict():
     from . import clustercnn_single
     from . import clustercnn_neighbors
     from . import clustercnn_stable
+    from . import clustercnn_fpn
+    from . import clustercnn_stack
+
 
     # Make some models available (not all of them, e.g. PPN is not standalone)
     models = {
@@ -54,6 +57,10 @@ def model_dict():
         "clusterunet_affinity": (clustercnn_neighbors.ClusterCNN, clustercnn_neighbors.ClusteringLoss),
         # ClusterUNet Stable (Multiscale loss with attention weighting and voxel-centroid push loss)
         "clusterunet": (clustercnn_stable.ClusterCNN, clustercnn_stable.ClusteringLoss),
+        # ClusterFPN Stable (Multiscale Enhanced Loss with FPN Backbone)
+        "clusterFPN": (clustercnn_fpn.ClusterCNN, clustercnn_fpn.ClusteringLoss),
+        # ClusterCNN Stack (Multiscale Enhanced Loss Stacked UResNet)
+        "clusterStack": (clustercnn_stack.ClusterCNN, clustercnn_stack.ClusteringLoss)
     }
     # "chain_gnn": (chain_gnn.Chain, chain_gnn.ChainLoss)
     return models

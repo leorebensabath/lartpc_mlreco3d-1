@@ -1,6 +1,6 @@
 from mlreco.models import uresnet_lonely
 from mlreco.models import uresnet
-from . import cluster_loss
+from . import loss
 
 def cluster_model_dict():
     """

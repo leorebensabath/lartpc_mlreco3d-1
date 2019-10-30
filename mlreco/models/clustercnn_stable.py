@@ -4,7 +4,8 @@ import numpy as np
 import sparseconvnet as scn
 
 from .cluster_cnn.clusternet import ClusterUNet
-from .cluster_cnn.cluster_loss import EnhancedEmbeddingLoss, MultiScaleLoss
+from .cluster_cnn.loss import EnhancedEmbeddingLoss, MultiScaleLoss
+from mlreco.models.layers.fpn import FPN
 
 class ClusterCNN(ClusterUNet):
     '''
@@ -17,7 +18,7 @@ class ClusterCNN(ClusterUNet):
 
 class ClusteringLoss(nn.Module):
     '''
-    
+    Loss for attention-weighted and multi-scale clustering loss.
     '''
     def __init__(self, cfg, name='clustering_loss'):
         super(ClusteringLoss, self).__init__()

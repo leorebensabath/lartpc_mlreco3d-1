@@ -238,14 +238,16 @@ class DiscriminativeLoss(torch.nn.Module):
         num_gpus = len(semantic_labels)
         loss = defaultdict(list)
         accuracy = defaultdict(list)
+        print(semantic_labels)
+        print(group_labels)
 
         for i in range(num_gpus):
-            slabels = semantic_labels[i][:, 4]
-            slabels = slabels.type(torch.LongTensor)
-            clabels = group_labels[i][:, 4]
+            slabels = semantic_labels[i][:, -1]
+            slabels = slabels.int()
+            clabels = group_labels[i][:, -1]
             batch_idx = semantic_labels[i][:, 3]
             embedding = out['cluster_feature'][i]
-            nbatch = int(batch_idx.unique().shape[0])
+            nbatch = batch_idx.unique().shape[0]
 
             for bidx in batch_idx.unique(sorted=True):
                 embedding_batch = embedding[batch_idx == bidx]
@@ -428,7 +430,12 @@ class MultiScaleLoss(DiscriminativeLoss):
 
 
 class NeighborLoss(MultiScaleLoss):
+    '''
+    Distance to Neighboring Ally and Enemy Loss
 
+    NOTE: This function has HUGE memory footprint and training
+    will crash under current implementation.
+    '''
     def __init__(self, cfg):
         super(NeighborLoss, self).__init__(cfg)
         self.loss_config = cfg['modules']['clustering_loss']
@@ -852,27 +859,8 @@ class EnhancedEmbeddingLoss(MultiScaleLoss):
                     data.update_dict(loss_i)
 
         res = data.as_dict()
-        print(res)
 
         return res
-
-
-
-class StackNetLoss(nn.Module):
-
-    def __init__(self, cfg, name='stacknet_loss'):
-        self.loss_config = cfg['modules'][name]
-        self.multiScale = self.loss_config.get('multi_scale', False)
-        self.loss_funcs = {}
-        self.loss_funcs['single'] = DiscriminativeLoss(cfg)
-        if self.multi_scale:
-            self.loss_funcs['multi'] = MultiScaleLoss(cfg)
-        self.final_layer_weight = self.loss_config.get('final_layer_weight', 1.0)
-        
-
-    def forward(self, result, segment_label, cluster_label):
-
-        res_final = self.loss_funcs['single'](result)
 
 
 # TODO:

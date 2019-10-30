@@ -4,7 +4,7 @@ import numpy as np
 import sparseconvnet as scn
 
 from .cluster_cnn.utils import add_normalized_coordinates
-from .cluster_cnn.cluster_loss import DiscriminativeLoss
+from .cluster_cnn.loss import DiscriminativeLoss
 from mlreco.models.uresnet import UResNet
 
 
