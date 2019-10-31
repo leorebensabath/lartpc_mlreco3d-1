@@ -51,3 +51,18 @@ def distance_matrix(points):
     inner_prod += squared
     inner_prod += squared.permute([0, 2, 1])
     return inner_prod.squeeze(0)
+
+
+def pairwise_distances(x, y=None):
+    '''
+    Input: x is a Nxd matrix
+           y is an optional Mxd matirx
+    Output: dist is a NxM matrix where dist[i,j] is the square norm between x[i,:] and y[j,:]
+            if y is not given then use 'y=x'.
+    i.e. dist[i,j] = ||x[i,:]-y[j,:]||^2
+    '''
+    x_norm = (x**2).sum(1).view(-1, 1)
+    y_norm = (y**2).sum(1).view(1, -1)
+
+    dist = x_norm + y_norm - 2.0 * torch.mm(x, torch.transpose(y, 0, 1))
+    return dist

@@ -5,7 +5,7 @@ import sparseconvnet as scn
 from collections import defaultdict
 
 from mlreco.models.layers.uresnet import UResNet
-from .utils import add_normalized_coordinates
+from .utils import add_normalized_coordinates, pairwise_distances
 
 
 class ClusterUNet(UResNet):
@@ -35,7 +35,8 @@ class ClusterUNet(UResNet):
         embedding_dim: int, optional
             Dimension of clustering hyperspace.
         '''
-        super(ClusterUNet, self).__init__(cfg, name='clusterunet')
+        super(ClusterUNet, self).__init__(cfg, name=name)
+        self.model_config = cfg['modules'][name]
         self.num_classes = self.model_config.get('num_classes', 5)
         self.N = self.model_config.get('N', 1)
         self.simpleN = self.model_config.get('simple_conv', False)
@@ -87,7 +88,7 @@ class ClusterUNet(UResNet):
             list of transformed features on which we apply clustering loss 
             at every spatial resolution.
         '''
-        features_dec = []
+        features_dec = [deepest_layer]
         cluster_feature = []
         x_seg = deepest_layer
         x_emb = deepest_layer
@@ -107,12 +108,13 @@ class ClusterUNet(UResNet):
         if self.coordConv:
             x_emb = add_normalized_coordinates(x_emb)
         x_emb = self.cluster_transform[-1](x_emb)
-        x_emb = self.embedding(x_emb)
         cluster_feature.append(x_emb)
+        x_emb = self.embedding(x_emb)
 
         result = {
             "features_dec": features_dec,
-            "cluster_feature": cluster_feature
+            "cluster_feature": cluster_feature,
+            'final_embedding': x_emb
         }
 
         return result
@@ -146,10 +148,115 @@ class ClusterUNet(UResNet):
         return res
 
 
-class ClusterUNetAE(ClusterUNet):
+class StackedClusterUNet(ClusterUNet):
     '''
     Cluster-UResNet with ally/enemy estimation map enhancement.
+    Both ClusterNet and StackNet architectures are mixed. 
     '''
-    def __init__(self, cfg, name='clusterunet_ae'):
-        super(ClusterUNetAE, self).__init__(cfg)
+    def __init__(self, cfg, name='clusterunet_stack'):
+        super(StackedClusterUNet, self).__init__(cfg, name=name)
         self.model_config = cfg['modules'][name]
+
+        # StackNet Model Parameters
+        self.model_config = cfg['modules'][name]
+        self.reduce_feature = self.model_config.get('reduce_feature', 'nin')
+        self.sum_features = sum(self.nPlanes)
+        self.embedding_dim = self.model_config.get('embedding_dim', 8)
+
+        # UnPooling Layers
+        self.learnable_upsampling = self.model_config.get('learnable_upsampling', False)
+        self.unpooling = scn.Sequential()
+
+        if self.learnable_upsampling:
+            # Using transpose convolution to upsample hierarchy of feature maps.
+            for i in range(self.num_strides-1):
+                m = scn.Sequential()
+                for j in range(self.num_strides-2-i, -1, -1):
+                    m.add(
+                        scn.BatchNormLeakyReLU(self.nPlanes[j+1], leakiness=self.leakiness)).add(
+                        scn.Deconvolution(self.dimension, self.nPlanes[j+1], self.nPlanes[j],
+                            self.downsample[0], self.downsample[1], self.allow_bias))
+                    self._resnet_block(m, self.nPlanes[j], self.nPlanes[j])
+                self.unpooling.add(m)
+            self.stackPlanes = self.nPlanes[::-1]
+        else:
+            # Using normal unpooling layers to upsample feature maps.
+            for i in range(self.num_strides-1):
+                m = scn.Sequential()
+                for _ in range(self.num_strides-1-i):
+                    m.add(
+                        scn.UnPooling(self.dimension, self.downsample[0], self.downsample[1]))
+                self.unpooling.add(m)
+            self.stackPlanes = [self.sum_features, 100, 20, 2]
+
+        self.reduction_layers = scn.Sequential()
+        if self.reduce_feature == 'resnet':
+            reduceBlock = self._resnet_block
+        elif self.reduce_feature == 'conv':
+            reduceBlock = self._block
+        elif self.reduce_feature == 'nin':
+            reduceBlock = self._nin_block
+        else:
+            raise ValueError('Invalid option for StackNet feature reducing layers.')
+
+        # NINs from segmentation feature planes + clustering feature planes -> distance est.
+        self.distance_features = scn.Sequential() 
+        for fDim in self.nPlanes[::-1]:
+            m = scn.Sequential()
+            m.add(scn.BatchNormLeakyReLU(fDim * 2, leakiness=self.leakiness)).add(
+                scn.NetworkInNetwork(fDim * 2, fDim, self.allow_bias))
+            self.distance_features.add(m)
+
+        # NIN Feature Reducing Layers to Distance Estimation
+        self.dist_reduce = scn.Sequential()
+        for i in range(len(self.stackPlanes)-1):
+            m = scn.Sequential()
+            reduceBlock(m, self.stackPlanes[i], self.stackPlanes[i+1])
+            self.dist_reduce.add(m)
+
+        self.concat = scn.JoinTable()
+    
+    def forward(self, input):
+        '''
+        point_cloud is a list of length minibatch size (assumes mbs = 1)
+        point_cloud[0] has 3 spatial coordinates + 1 batch coordinate + 1 feature
+        label has shape (point_cloud.shape[0] + 5*num_labels, 1)
+        label contains segmentation labels for each point + coords of gt points
+
+        RETURNS:
+            - feature_dec: decoder features at each spatial resolution.
+            - cluster_feature: clustering features at each spatial resolution.
+            - distance_estimation: distance estimation map at highest resolution.
+        '''
+        point_cloud, = input
+        coords = point_cloud[:, 0:self.dimension+1].float()
+        features = point_cloud[:, self.dimension+1:].float()
+        res = {}
+
+        x = self.input((coords, features))
+        encoder_output = self.encoder(x)
+        decoder_output = self.decoder(encoder_output['features_enc'],
+                                encoder_output['deepest_layer'])
+
+        features_dec = decoder_output['features_dec']
+        cluster_feature = decoder_output['cluster_feature']
+        stack_feature = []
+
+        for i, layer in enumerate(features_dec):
+            if i < self.num_strides-1:
+                f = self.concat([layer, cluster_feature[i]])
+                f = self.distance_features[i](f)
+                f = self.unpooling[i](f)
+                stack_feature.append(f)
+            else:
+                stack_feature.append(layer)
+        
+        stack_feature = self.concat(stack_feature)
+        distance_estimation = self.dist_reduce(stack_feature)
+        res['features_dec'] = [features_dec]
+        # Reverse cluster feature tensor list to agree with label ordering.
+        res['cluster_feature'] = [cluster_feature[::-1]]
+        res['distance_estimation'] = [distance_estimation]
+        res['final_embedding'] = [decoder_output['final_embedding']]
+        
+        return res

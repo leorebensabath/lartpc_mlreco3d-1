@@ -20,6 +20,7 @@ def model_dict():
     from . import clustercnn_stable
     from . import clustercnn_fpn
     from . import clustercnn_stack
+    from . import clustercnn_distances
 
 
     # Make some models available (not all of them, e.g. PPN is not standalone)
@@ -60,7 +61,9 @@ def model_dict():
         # ClusterFPN Stable (Multiscale Enhanced Loss with FPN Backbone)
         "clusterFPN": (clustercnn_fpn.ClusterCNN, clustercnn_fpn.ClusteringLoss),
         # ClusterCNN Stack (Multiscale Enhanced Loss Stacked UResNet)
-        "clusterStack": (clustercnn_stack.ClusterCNN, clustercnn_stack.ClusteringLoss)
+        "clusterStack": (clustercnn_stack.ClusterCNN, clustercnn_stack.ClusteringLoss),
+        # ClusterCNN Distances (Multiscale Enhanced Loss Stacked UResNet with Distance Estimation)
+        "clustercnn_distances": (clustercnn_distances.ClusterCNN, clustercnn_distances.ClusteringLoss)
     }
     # "chain_gnn": (chain_gnn.Chain, chain_gnn.ChainLoss)
     return models

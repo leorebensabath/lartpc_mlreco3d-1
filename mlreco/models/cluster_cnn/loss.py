@@ -5,7 +5,7 @@ import sparseconvnet as scn
 
 from collections import defaultdict
 from mlreco.utils.utils import ForwardData
-from .utils import distance_matrix
+from .utils import distance_matrix, pairwise_distances
 
 
 class DiscriminativeLoss(torch.nn.Module):
@@ -238,8 +238,6 @@ class DiscriminativeLoss(torch.nn.Module):
         num_gpus = len(semantic_labels)
         loss = defaultdict(list)
         accuracy = defaultdict(list)
-        print(semantic_labels)
-        print(group_labels)
 
         for i in range(num_gpus):
             slabels = semantic_labels[i][:, -1]
@@ -597,6 +595,15 @@ class EnhancedEmbeddingLoss(MultiScaleLoss):
         self.spatial_size = self.loss_config.get('spatial_size', 512)
         self.ally_weight = self.loss_config.get('ally_weight', 1.0)
         self.enemy_weight = self.loss_config.get('enemy_weight', 0.0)
+        self.attention_kernel = self.loss_config.get('attention_kernel', 1)
+        self.compute_enemy_loss = self.loss_config.get('compute_enemy_loss', True)
+        self.compute_attention_weights = self.loss_config.get('compute_attention_weights', True)
+        if self.attention_kernel == 0:
+            self.kernel_func = lambda x: 1.0 + torch.exp(-x)
+        elif self.attention_kernel == 1:
+            self.kernel_func = lambda x: 2.0 / (1 + torch.exp(-x))
+        else:
+            raise ValueError('Invalid weighting kernel function mode.')
 
     def compute_attention_weight(self, coords, labels):
         '''
@@ -622,7 +629,7 @@ class EnhancedEmbeddingLoss(MultiScaleLoss):
                 index = labels == c
                 dists = torch.norm(coords[index] - centroids[i] + 1e-8,
                                     p=self.norm, dim=1) / self.spatial_size
-                weights[index] = (1.0 + torch.exp(-dists))
+                weights[index] = self.kernel_func(dists)
         return weights
 
 
@@ -653,7 +660,7 @@ class EnhancedEmbeddingLoss(MultiScaleLoss):
             x = self.ally_weight * torch.mean(weight[index] * torch.pow(allies, 2))
             intra_loss += x
             ally_loss += float(x)
-            if index.all():
+            if index.all() or self.compute_enemy_loss:
                 continue
             enemies = torch.norm(features[~index] - cluster_means[i] + 1e-8,
                     p=self.norm, dim=1)
@@ -707,7 +714,7 @@ class EnhancedEmbeddingLoss(MultiScaleLoss):
         intra_weight = kwargs.get('intra_weight', 1.0)
         inter_weight = kwargs.get('inter_weight', 1.0)
         reg_weight = kwargs.get('reg_weight', 0.001)
-        attention_weight = kwargs.get('attention_weight', 1.0)
+        attention_weights = kwargs.get('attention_weights', 1.0)
 
         c_means = self.find_cluster_means(features, labels)
         inter_loss = self.inter_cluster_loss(c_means, margin=inter_margin)
@@ -716,7 +723,7 @@ class EnhancedEmbeddingLoss(MultiScaleLoss):
                                            c_means,
                                            ally_margin=ally_margin,
                                            enemy_margin=enemy_margin,
-                                           weight=attention_weight)
+                                           weight=attention_weights)
         reg_loss = self.regularization(c_means)
 
         loss = intra_weight * intra_loss + inter_weight \
@@ -804,17 +811,17 @@ class EnhancedEmbeddingLoss(MultiScaleLoss):
         coords = coords[perm].float()
         if torch.cuda.is_available():
             coords = coords.cuda()
-        attention_weights = self.compute_attention_weight(coords, clabels[:, -1])
 
         for bidx in batch_idx:
             index = slabels[:, 3].int() == bidx
             embedding_batch = embedding[index]
             slabels_batch = slabels[index][:, -1]
             clabels_batch = clabels[index][:, -1]
-            weights_batch = attention_weights[index]
+            coords_batch = coords[index][:, :3]
+            attention_weights = self.compute_attention_weight(coords_batch, clabels_batch)
             loss_dict, acc_dict = self.combine_multiclass(
                 embedding_batch, slabels_batch, clabels_batch,
-                attention_weight=weights_batch, **kwargs)
+                attention_weights=attention_weights, **kwargs)
             loss.update_dict(loss_dict)
             accuracy.update_dict(acc_dict)
 
@@ -845,6 +852,7 @@ class EnhancedEmbeddingLoss(MultiScaleLoss):
                 delta_var, delta_dist = self.intra_margins[i], self.inter_margins[i]
                 # Compute accuracy at last layer.
                 if i == 0:
+                    em = out['final_embedding'][i_gpu]
                     loss_i, acc_i = self.compute_loss_layer(
                         em, semantic_labels[i_gpu][i], group_labels[i_gpu][i], batch_idx,
                         delta_var=delta_var, delta_dist=delta_dist,
@@ -859,7 +867,141 @@ class EnhancedEmbeddingLoss(MultiScaleLoss):
                     data.update_dict(loss_i)
 
         res = data.as_dict()
+        return res
 
+
+class DistanceEstimationLoss(EnhancedEmbeddingLoss):
+
+
+    def __init__(self, cfg, name='clustering_loss'):
+        super(DistanceEstimationLoss, self).__init__(cfg, name='clustering_loss')
+        self.clustering_loss = EnhancedEmbeddingLoss(cfg)
+        self.loss_config = cfg['modules'][name]
+        self.huber_loss = torch.nn.SmoothL1Loss(reduction='mean')
+        self.num_neighbors = self.loss_config.get('num_neighbors', 10)
+        self.distance_estimate_weight = self.loss_config.get('distance_estimate_weight', 1.0)
+        self.clustering_weight = self.loss_config.get('clustering_weight', 1.0)
+        self.compute_enemy_loss = self.loss_config.get('compute_enemy_loss', True)
+
+    def get_nn_map(self, embedding_class, cluster_class):
+        """
+        Computes voxel team loss.
+
+        INPUTS:
+            (torch.Tensor)
+            - embedding_class: class-masked hyperspace embedding
+            - cluster_class: class-masked cluster labels
+
+        RETURNS:
+            - loss (torch.Tensor): scalar tensor representing aggregated loss.
+            - dlossF (dict of floats): dictionary of ally loss.
+            - dlossE (dict of floats): dictionary of enemy loss.
+            - dloss_map (torch.Tensor): computed ally/enemy affinity for each voxel. 
+        """
+        with torch.no_grad():
+            allyMap = torch.zeros(embedding_class.shape[0])
+            enemyMap = torch.zeros(embedding_class.shape[0])
+            if torch.cuda.is_available():
+                allyMap = allyMap.cuda()
+                enemyMap = enemyMap.cuda() 
+            dist = distance_matrix(embedding_class)
+            cluster_ids = cluster_class.unique().int()
+            num_clusters = float(cluster_ids.shape[0])
+            for c in cluster_ids:
+                index = cluster_class.int() == c
+                allies = dist[index, :][:, index]
+                num_allies = allies.shape[0]
+                if num_allies <= 1:
+                    # Skip if only one point
+                    continue
+                ind = np.diag_indices(num_allies)
+                allies[ind[0], ind[1]] = float('inf')
+                allies, _ = torch.min(allies, dim=1)
+                allyMap[index] = allies
+                if index.all(): 
+                    # Skip if there are no enemies
+                    continue
+                enemies, _ = torch.min(dist[index, :][:, ~index], dim=1)
+                enemyMap[index] = enemies
+
+            nnMap = torch.cat([allyMap.view(-1, 1), enemyMap.view(-1, 1)], dim=1)         
+            return nnMap
+
+
+    def forward(self, result, segment_label, cluster_label):
+        '''
+        Mostly borrowed from uresnet_clustering.py
+        '''
+        data = ForwardData()
+        num_gpus = len(segment_label)
+        loss = 0.0
+        clustering_loss = 0.0
+        distance_estimate_loss = 0.0
+        count = 0
+
+        # Loop first over scaled feature maps
+        for i_gpu in range(num_gpus):
+            for depth in range(self.depth):
+
+                batch_ids = segment_label[i_gpu][depth][:, 3].detach().cpu().int().numpy()
+                batch_ids = np.unique(batch_ids)
+                batch_size = len(batch_ids)
+
+                embedding = result['cluster_feature'][i_gpu][depth]
+                clabels_depth = cluster_label[i_gpu][depth]
+                slabels_depth = segment_label[i_gpu][depth]
+
+                coords = embedding.get_spatial_locations()[:, :4]
+                perm = np.lexsort((coords[:, 2], coords[:, 1], coords[:, 0], coords[:, 3]))
+                coords = coords[perm].float()
+                if torch.cuda.is_available():
+                    coords = coords.cuda()
+                feature_map = embedding.features[perm]
+                if depth == 0:
+                    distance_estimation = result['distance_estimation'][i_gpu]
+                    distance_estimation = distance_estimation.features[perm]
+                for bidx in batch_ids:
+                    batch_mask = coords[:, 3] == bidx
+                    hypercoordinates = feature_map[batch_mask]
+                    slabels_event = slabels_depth[batch_mask]
+                    clabels_event = clabels_depth[batch_mask]
+                    coords_event = coords[batch_mask]
+
+                    # Loop over semantic labels:
+                    semantic_classes = slabels_event[:, -1].unique()
+                    n_classes = len(semantic_classes)
+                    for class_ in semantic_classes:
+                        k = int(class_)
+                        class_mask = slabels_event[:, -1] == class_
+                        embedding_class = hypercoordinates[class_mask]
+                        cluster_class = clabels_event[class_mask][:, -1]
+                        attention_weights = self.compute_attention_weight(coords_event[class_mask], cluster_class)
+                        # Clustering Loss
+                        acc = self.compute_heuristic_accuracy(embedding_class,
+                                                              cluster_class)
+                        closs = self.combine(embedding_class,
+                                             cluster_class,
+                            intra_margin=self.intra_margins[depth],
+                            inter_margin=self.inter_margins[depth],
+                            attention_weights=attention_weights)
+                        if depth == 0:
+                            nnMap = self.get_nn_map(embedding_class, cluster_class)
+                            nnTruth = distance_estimation[batch_mask][class_mask]
+                            distance_estimate_loss += self.huber_loss(nnMap, nnTruth) * self.distance_estimate_weight
+                            data.update_mean('distance_estimate_loss', distance_estimate_loss)
+                            data.update_mean('distance_estimate_loss_{}'.format(class_), float(distance_estimate_loss))
+                        # Informations to be saved in log file (loss/accuracy). 
+                        data.update_mean('accuracy', acc)
+                        data.update_mean('intra_loss', closs['intra_loss'])
+                        data.update_mean('inter_loss', closs['inter_loss'])
+                        data.update_mean('reg_loss', closs['reg_loss'])
+                        data.update_mean('accuracy_{}'.format(class_), acc)
+                        data.update_mean('intra_loss_{}'.format(class_), closs['intra_loss'])
+                        data.update_mean('inter_loss_{}'.format(class_), closs['inter_loss'])
+                        data.update_mean('clustering_loss', self.clustering_weight * closs['loss'])
+
+        res = data.as_dict()
+        res['loss'] = res['clustering_loss'] + res['distance_estimate_loss']
         return res
 
 

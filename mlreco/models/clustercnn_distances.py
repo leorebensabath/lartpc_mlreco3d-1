@@ -3,17 +3,17 @@ import torch.nn as nn
 import numpy as np
 import sparseconvnet as scn
 
+from .cluster_cnn.loss import DistanceEstimationLoss
 from .cluster_cnn.clusternet import ClusterUNet
-from .cluster_cnn.loss import EnhancedEmbeddingLoss, MultiScaleLoss
-from mlreco.models.layers.fpn import FPN
 
 class ClusterCNN(ClusterUNet):
     '''
     UResNet with multi-scale convolution blocks for clustering at
-    each spatial resolution.
+    each spatial resolution. In the last clustering feature layer,
+    we add a distance estimation branch. 
     '''
-    def __init__(self, cfg, name='clusterunet'):
-        super(ClusterCNN, self).__init__(cfg, name=name)
+    def __init__(self, cfg, name='clusterunet_distances'):
+        super(ClusterCNN, self).__init__(cfg, name='clusterunet')
         self.model_config = cfg['modules'][name]
         self.N_dist = self.model_config.get('N_dist', 3)
         self.distance_blocks = self.model_config.get('block', 'conv')
@@ -31,6 +31,9 @@ class ClusterCNN(ClusterUNet):
             m = scn.Sequential()
             distanceBlock(m, feature_size, feature_size)
             self.distance_branch.add(m)
+        
+        # Final 1x1 Convolution to Distance Estimation Map
+        self._nin_block(self.distance_branch, feature_size, 2)
     
     def forward(self, input):
         '''
@@ -73,10 +76,8 @@ class ClusteringLoss(nn.Module):
         self.model_config = cfg['modules'][name]
 
         # TODO: Define single model with configurable enhancements. 
-
-        self.loss_func = MultiScaleLoss(cfg)
+        self.loss_func = DistanceEstimationLoss(cfg)
 
     def forward(self, out, segment_label, cluster_label):
-
         result = self.loss_func(out, segment_label, cluster_label)
         return result

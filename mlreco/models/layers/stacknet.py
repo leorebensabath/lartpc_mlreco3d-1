@@ -107,13 +107,14 @@ class StackUNet(UResNet):
             else:
                 stack_feature.append(layer)
         
-        out = self.concat(stack_feature)
-        out = self.cluster_decoder(out)
+        stack_feature = self.concat(stack_feature)
+        out = self.cluster_decoder(stack_feature)
         out = self.embedding(out)
 
         res = {
             'features_dec': features_dec,
-            'cluster_feature': [out]
+            'cluster_feature': [out],
+            'stacked_features': [stack_feature]
             }
 
         return res

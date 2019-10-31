@@ -24,7 +24,18 @@ from sklearn.cluster import DBSCAN
 
 def join_training_logs(log_dir):
 
-    pass
+    training_logs = sorted([os.path.join(log_dir, fname) \
+        for fname in os.listdir(log_dir)])
+    data = pd.DataFrame()
+    df_temp = pd.read_csv(training_logs[0])
+    for fname in training_logs[1:]:
+        df = pd.read_csv(fname)
+        start_iter = df['iter'].min()
+        data = pd.concat([data, df_temp[df_temp['iter'] < start_iter]], ignore_index=True)
+        df_temp = df
+    data = pd.concat([data, df_temp])
+
+    return data
 
 
 def make_inference_cfg(train_cfg, gpu=1, iterations=128, snapshot=None):
