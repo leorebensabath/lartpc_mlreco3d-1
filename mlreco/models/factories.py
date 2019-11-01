@@ -22,6 +22,8 @@ def model_dict():
     from . import clustercnn_stack
     from . import clustercnn_distances
 
+    from . import clusternet
+
 
     # Make some models available (not all of them, e.g. PPN is not standalone)
     models = {
@@ -63,7 +65,9 @@ def model_dict():
         # ClusterCNN Stack (Multiscale Enhanced Loss Stacked UResNet)
         "clusterStack": (clustercnn_stack.ClusterCNN, clustercnn_stack.ClusteringLoss),
         # ClusterCNN Distances (Multiscale Enhanced Loss Stacked UResNet with Distance Estimation)
-        "clustercnn_distances": (clustercnn_distances.ClusterCNN, clustercnn_distances.ClusteringLoss)
+        "clustercnn_distances": (clustercnn_distances.ClusterCNN, clustercnn_distances.ClusteringLoss),
+        # Colossal ClusterNet Model to Wrap them all
+        "clusternet": (clusternet.ClusterCNN, clusternet.ClusteringLoss)
     }
     # "chain_gnn": (chain_gnn.Chain, chain_gnn.ChainLoss)
     return models

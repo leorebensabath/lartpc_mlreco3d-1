@@ -362,9 +362,10 @@ class MultiScaleLoss(DiscriminativeLoss):
                 acc = self.compute_heuristic_accuracy(embedding_batch, clabels_batch)
                 accuracy.append(acc)
 
-        summed_loss = { key : sum(l) for key, l in loss.items() }
-        averaged_acc = { key : sum(l) / float(len(l)) for key, l in accuracy.items() }
-        return summed_loss, averaged_acc
+        # Averaged over batch at each layer
+        loss = { key : sum(l) / float(len(l)) for key, l in loss.items() }
+        accuracy = { key : sum(l) / float(len(l)) for key, l in accuracy.items() }
+        return loss, accuracy
 
 
     def forward(self, out, semantic_labels, group_labels):
@@ -382,8 +383,10 @@ class MultiScaleLoss(DiscriminativeLoss):
 
         loss = defaultdict(list)
         accuracy = defaultdict(float)
+        num_gpus = len(semantic_labels)
+        num_layers = len(out['cluster_feature'][0])
 
-        for i_gpu in range(len(semantic_labels)):
+        for i_gpu in range(num_gpus):
             batch_idx = semantic_labels[i_gpu][0][:, 3].detach().cpu().int().numpy()
             batch_idx = np.unique(batch_idx)
             batch_size = len(batch_idx)
@@ -395,33 +398,33 @@ class MultiScaleLoss(DiscriminativeLoss):
                     delta_var=delta_var, delta_dist=delta_dist)
                 for key, val in loss_i.items():
                     loss[key].append(val)
-                # Compute accuracy at last layer.
+                # Compute accuracy only at last layer.
                 if i == 0:
                     acc_clustering = acc_i
             for key, acc in acc_clustering.items():
-                accuracy[key] = float(acc) * len(batch_idx)
+                # Batch Averaged Accuracy
+                accuracy[key] = float(acc)
 
-        clustering_loss = sum(loss["loss"])
-        intra_loss = sum(loss["intra_loss"])
-        inter_loss = sum(loss["inter_loss"])
-        reg_loss = sum(loss["reg_loss"])
+        # Average over layers and num_gpus
+        clustering_loss = sum(loss["loss"]) / (num_layers * num_gpus)
+        intra_loss = sum(loss["intra_loss"]) / (num_layers * num_gpus)
+        inter_loss = sum(loss["inter_loss"]) / (num_layers * num_gpus)
+        reg_loss = sum(loss["reg_loss"]) / (num_layers * num_gpus)
 
-        total_acc = 0
-        for acc in accuracy.values():
-            total_acc += acc / len(accuracy.keys())
+        total_acc = sum(accuracy.values()) / len(accuracy.keys())
         accuracy['accuracy'] = total_acc
 
         res = {
-            "loss": clustering_loss / batch_size,
-            "intra_loss": intra_loss / batch_size,
-            "reg_loss": reg_loss / batch_size,
-            "inter_loss": inter_loss / batch_size,
+            "loss": clustering_loss,
+            "intra_loss": intra_loss,
+            "reg_loss": reg_loss,
+            "inter_loss": inter_loss,
             "acc_0": accuracy[0],
             "acc_1": accuracy[1],
             "acc_2": accuracy[2],
             "acc_3": accuracy[3],
             "acc_4": accuracy[4],
-            "accuracy": accuracy['accuracy'] / batch_size
+            "accuracy": accuracy['accuracy']
         }
 
         return res
@@ -874,7 +877,7 @@ class DistanceEstimationLoss(EnhancedEmbeddingLoss):
 
 
     def __init__(self, cfg, name='clustering_loss'):
-        super(DistanceEstimationLoss, self).__init__(cfg, name='clustering_loss')
+        super(DistanceEstimationLoss, self).__init__(cfg, name='uresnet')
         self.clustering_loss = EnhancedEmbeddingLoss(cfg)
         self.loss_config = cfg['modules'][name]
         self.huber_loss = torch.nn.SmoothL1Loss(reduction='mean')

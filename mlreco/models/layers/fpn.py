@@ -36,7 +36,10 @@ class FPN(UResNet):
     """
     def __init__(self, cfg, name='uresnet'):
         super(FPN, self).__init__(cfg, name=name)
-
+        if 'modules' in cfg:
+            self.model_config = cfg['modules'][name]
+        else:
+            self.model_config = cfg
         # Now decoding block does not reduce features from 2f -> f. 
         self.decoding_block = scn.Sequential()
         self.decoding_conv = scn.Sequential()

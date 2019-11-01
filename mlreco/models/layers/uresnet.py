@@ -34,7 +34,10 @@ class UResNet(NetworkBase):
     '''
     def __init__(self, cfg, name="uresnet"):
         super(UResNet, self).__init__(cfg)
-        self.model_config = cfg['modules'][name]
+        if 'modules' in cfg:
+            self.model_config = cfg['modules'][name]
+        else:
+            self.model_config = cfg
 
         # UResNet Configurations
         self.reps = self.model_config.get('reps', 2)  # Conv block repetition factor
