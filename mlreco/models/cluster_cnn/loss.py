@@ -406,7 +406,11 @@ class MultiScaleLoss2(MultiScaleLoss):
     def __init__(self, cfg, name='clustering_loss'):
         super(MultiScaleLoss2, self).__init__(cfg, name=name)
         self.ally_weight = self.loss_config.get('ally_weight', 1.0)
-        self.enemy_weight = self.loss_config.get('enemy_weight', 1.0)
+        self.ally_margins = self.intra_margins
+        self.enemy_weight = self.loss_config.get('enemy_weight', 10.0)
+        self.loss_hyperparams['enemy_margin'] = self.loss_config.get('enemy_margin', 1.0)
+        self.enemy_margins = self.loss_config.get('enemy_margins',
+            [self.loss_hyperparams['enemy_margin'] / 2**i for i in range(self.num_strides)])
 
 
     def intra_cluster_loss(self, features, labels, cluster_means,
@@ -441,9 +445,9 @@ class MultiScaleLoss2(MultiScaleLoss):
             enemies = torch.norm(features[~index] - cluster_means[i] + 1e-8,
                     p=self.norm, dim=1)
             enemies = torch.clamp(enemy_margin - enemies, min=0)
-            x = self.enemy_weight * torch.mean(torch.pow(enemies, 2))
+            x = self.enemy_weight * torch.sum(torch.pow(enemies, 2))
             intra_loss += x
-            enemy_loss += x
+            enemy_loss += float(x)
 
         intra_loss /= n_clusters
         ally_loss /= n_clusters
@@ -492,12 +496,65 @@ class MultiScaleLoss2(MultiScaleLoss):
         }
 
 
+    def forward(self, out, semantic_labels, group_labels):
+        '''
+        Forward function for the Discriminative Loss Module.
+
+        Inputs:
+            out: output of UResNet; embedding-space coordinates.
+            semantic_labels: ground-truth semantic labels
+            group_labels: ground-truth instance labels
+        Returns:
+            (dict): A dictionary containing key-value pairs for
+            loss, accuracy, etc.
+        '''
+
+        loss = defaultdict(list)
+        accuracy = defaultdict(list)
+        num_gpus = len(semantic_labels)
+        num_layers = len(out['cluster_feature'][0])
+
+        for i_gpu in range(num_gpus):
+            batch_idx = semantic_labels[i_gpu][0][:, 3].detach().cpu().int().numpy()
+            batch_idx = np.unique(batch_idx)
+            batch_size = len(batch_idx)
+            # Summing clustering loss over layers.
+            for i, em in enumerate(out['cluster_feature'][i_gpu]):
+                delta_var, delta_dist = self.ally_margins[i], self.inter_margins[i]
+                delta_enemy = self.enemy_margins[i]
+                loss_i, acc_i = self.compute_loss_layer(
+                    em, semantic_labels[i_gpu][i], group_labels[i_gpu][i], batch_idx,
+                    ally_margin=delta_var, inter_margin=delta_dist, enemy_margin=delta_enemy)
+                for key, val in loss_i.items():
+                    loss[key].append(val)
+                # Compute accuracy only at last layer.
+                if i == 0:
+                    acc_clustering = acc_i
+            for key, acc in acc_clustering.items():
+                # Batch Averaged Accuracy
+                accuracy[key].append(acc)
+
+        # Average over layers and num_gpus
+        loss_avg = {}
+        acc_avg = {}
+        for key, val in loss.items():
+            loss_avg[key] = sum(val) / len(val)
+        for key, val in accuracy.items():
+            acc_avg[key] = sum(val) / len(val)
+
+        res = {}
+        res.update(loss_avg)
+        res.update(acc_avg)
+
+        return res
+
+
 class WeightedMultiLoss(MultiScaleLoss):
     '''
     Same as MultiScaleLoss, but with attention weighting.
     '''
     def __init__(self, cfg, name='clustering_loss'):
-        super(WeightedMultiLoss, self).__init__()
+        super(WeightedMultiLoss, self).__init__(cfg, name=name)
         self.attention_kernel = self.loss_config.get('attention_kernel', 1)
         if self.attention_kernel == 0:
             self.kernel_func = lambda x: 1.0 + torch.exp(-x)
@@ -507,7 +564,7 @@ class WeightedMultiLoss(MultiScaleLoss):
             raise ValueError('Invalid weighting kernel function mode.')
 
 
-    def intra_cluster_loss(self, features, labels, cluster_means, coords):
+    def intra_cluster_loss(self, features, labels, cluster_means, coords, margin=0.5):
         '''
         Intra-cluster loss, with per-voxel weighting and enemy loss.
         This variant of intra-cluster loss penalizes the distance 
@@ -532,12 +589,13 @@ class WeightedMultiLoss(MultiScaleLoss):
             index = (labels == c)
             allies = torch.norm(features[index] - cluster_means[i] + 1e-8,
                                p=self.norm, dim=1)
-            allies = torch.clamp(allies - ally_margin, min=0)
+            allies = torch.clamp(allies - margin, min=0)
             with torch.no_grad():
                 dists = torch.norm(coords[index] - coords_mean[i] + 1e-8,
-                                    p=self.norm, dim=1) / self.spatial_size
+                                    p=self.norm, dim=1)
+                dists = dists / (dists.std(unbiased=False) + 1e-4)
                 weight = self.kernel_func(dists)
-            intra_loss += torch.mean(weight[index] * torch.pow(allies, 2))
+            intra_loss += torch.mean(weight * torch.pow(allies, 2))
 
         intra_loss /= n_clusters
         return intra_loss
@@ -556,6 +614,7 @@ class WeightedMultiLoss(MultiScaleLoss):
         # We allow changing the parameters at each computation in order
         # to alter the margins at each spatial resolution in multi-scale losses. 
         inter_margin = kwargs.get('inter_margin', 1.5)
+        intra_margin = kwargs.get('intra_margin', 0.5)
         intra_weight = kwargs.get('intra_weight', 1.0)
         inter_weight = kwargs.get('inter_weight', 1.0)
         reg_weight = kwargs.get('reg_weight', 0.001)
@@ -563,10 +622,11 @@ class WeightedMultiLoss(MultiScaleLoss):
 
         c_means = self.find_cluster_means(features, labels)
         inter_loss = self.inter_cluster_loss(c_means, margin=inter_margin)
-        intra_loss, ally_loss, enemy_loss = self.intra_cluster_loss(features,
+        intra_loss = self.intra_cluster_loss(features,
                                            labels,
                                            c_means,
-                                           coords)
+                                           coords,
+                                           margin=intra_margin)
         reg_loss = self.regularization(c_means)
 
         loss = intra_weight * intra_loss + inter_weight \
@@ -576,9 +636,7 @@ class WeightedMultiLoss(MultiScaleLoss):
             'loss': loss, 
             'intra_loss': intra_weight * float(intra_loss),
             'inter_loss': inter_weight * float(inter_loss),
-            'reg_loss': reg_weight * float(reg_loss),
-            'ally_loss': intra_weight * float(ally_loss),
-            'enemy_loss': intra_weight * float(enemy_loss)
+            'reg_loss': reg_weight * float(reg_loss)
         }
 
 
@@ -639,8 +697,9 @@ class WeightedMultiLoss(MultiScaleLoss):
                             inter_margin=self.inter_margins[depth],
                             coords=coords_class)
                         for key, val in closs.items():
-                            loss_class[key].append(key)
-                    accuracy['accuracy'].append(acc_avg)
+                            loss_class[key].append(val)
+                    if depth == 0:
+                        accuracy['accuracy'].append(acc_avg)
                     for key, val in loss_class.items():
                         loss_event[key].append(sum(val) / len(val))
                 for key, val in loss_event.items():

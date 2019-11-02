@@ -165,6 +165,56 @@ class ClusterEmbeddings(NetworkBase):
         return res
 
 
+class ClusterEmbeddingsFPN(ClusterEmbeddings):
+
+    def __init__(self, cfg, backbone, name='embeddings'):
+        super(ClusterEmbeddingsFPN, self).__init__(cfg, backbone, name=name)
+
+    def decoder(self, features_enc, deepest_layer):
+        '''
+        ClusterUNet Decoder for FPN Type Backbones
+
+        INPUTS:
+            - features_enc (list of scn.SparseConvNetTensor): output of encoder.
+
+        RETURNS:
+            - features_dec (list of scn.SparseConvNetTensor): 
+            list of feature tensors in decoding path at each spatial resolution.
+            - features_cluster (list of scn.SparseConvNetTensor): 
+            list of transformed features on which we apply clustering loss 
+            at every spatial resolution.
+        '''
+        features_dec = []
+        cluster_feature = []
+        x_seg = deepest_layer
+        x_emb = deepest_layer
+        for i, layer in enumerate(self.net.decoding_conv):
+            encoder_feature = features_enc[-i-2]
+            if self.coordConv:
+                x_emb = add_normalized_coordinates(x_emb)
+            x_emb = self.cluster_transform[i](x_emb)
+            cluster_feature.append(x_emb)
+            x_emb = self.cluster_conv[i](x_emb)
+            x_seg = layer(x_seg)
+            x_seg = self.net.add([encoder_feature, x_seg])
+            x_seg = self.net.decoding_block[i](x_seg)
+            features_dec.append(x_seg)
+            x_emb = self.net.concat([x_emb, x_seg])
+        # Compensate for last clustering convolution
+        if self.coordConv:
+            x_emb = add_normalized_coordinates(x_emb)
+        x_emb = self.cluster_transform[-1](x_emb)
+        cluster_feature.append(x_emb)
+
+        result = {
+            "features_dec": features_dec,
+            "cluster_feature": cluster_feature
+        }
+
+        return result
+
+
+
 class StackedEmbeddings(NetworkBase):
 
 

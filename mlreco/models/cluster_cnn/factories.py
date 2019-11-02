@@ -23,6 +23,7 @@ def cluster_model_dict():
     models = {
         "single": None,
         "multi": embeddings.ClusterEmbeddings,
+        "multi_fpn": embeddings.ClusterEmbeddingsFPN,
         "stack_multi": embeddings.StackedEmbeddings
     }
     return models
