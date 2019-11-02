@@ -27,7 +27,7 @@ class ClusterCNN(NetworkBase):
     Configurations
     ----------------------------------------------------------
     backbone: the type of backbone architecture to be used in the
-    feature extraction stages. Currently the following optinos are
+    feature extraction stages. Currently the following options are
     available:
         - UResNet: Vanilla UResNet
         - FPN: Feature Pyramid Networks
@@ -67,6 +67,7 @@ class ClusterCNN(NetworkBase):
             self.dist_N = self.proximity_config.get('dist_N', 3)
             self.dist_simple_conv = self.proximity_config.get('dist_simple_conv', False)
             self.distance_estimate = scn.Sequential()
+            self.compute_distance_estimate = self.proximity_config.get('compute_distance_estimate', False)
             if self.dist_simple_conv:
                 distanceBlock = self._block
             else:
@@ -83,9 +84,12 @@ class ClusterCNN(NetworkBase):
 
     def forward(self, input):
         '''
-
+        Forward function for whole ClusterNet Chain.
         '''
         result = self.net(input)
+        embedding = result['cluster_feature'][0][0]
+        if self.compute_distance_estimate:
+            result['distance_estimation'] = [self.distance_estimate(embedding)]
         return result
 
 

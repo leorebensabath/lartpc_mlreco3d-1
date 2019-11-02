@@ -1160,18 +1160,15 @@ class EnhancedEmbeddingLoss(MultiScaleLoss):
         return res
 
 
-class DistanceEstimationLoss(EnhancedEmbeddingLoss):
+class DistanceEstimationLoss(MultiScaleLoss):
 
 
     def __init__(self, cfg, name='clustering_loss'):
         super(DistanceEstimationLoss, self).__init__(cfg, name='uresnet')
-        self.clustering_loss = EnhancedEmbeddingLoss(cfg)
         self.loss_config = cfg['modules'][name]
         self.huber_loss = torch.nn.SmoothL1Loss(reduction='mean')
-        self.num_neighbors = self.loss_config.get('num_neighbors', 10)
         self.distance_estimate_weight = self.loss_config.get('distance_estimate_weight', 1.0)
         self.clustering_weight = self.loss_config.get('clustering_weight', 1.0)
-        self.compute_enemy_loss = self.loss_config.get('compute_enemy_loss', True)
 
     def get_nn_map(self, embedding_class, cluster_class):
         """
@@ -1222,15 +1219,15 @@ class DistanceEstimationLoss(EnhancedEmbeddingLoss):
         '''
         Mostly borrowed from uresnet_clustering.py
         '''
-        data = ForwardData()
         num_gpus = len(segment_label)
-        loss = 0.0
-        clustering_loss = 0.0
-        distance_estimate_loss = 0.0
-        count = 0
+        loss, accuracy = defaultdict(list), defaultdict(list)
 
         # Loop first over scaled feature maps
         for i_gpu in range(num_gpus):
+            distance_estimate = result['distance_estimation'][i_gpu]
+            dcoords = distance_estimate.get_spatial_locations()[:, :4]
+            perm = np.lexsort((dcoords[:, 2], dcoords[:, 1], dcoords[:, 0], dcoords[:, 3]))
+            distance_estimate = distance_estimate.features[perm]
             for depth in range(self.depth):
 
                 batch_ids = segment_label[i_gpu][depth][:, 3].detach().cpu().int().numpy()
@@ -1243,55 +1240,67 @@ class DistanceEstimationLoss(EnhancedEmbeddingLoss):
 
                 coords = embedding.get_spatial_locations()[:, :4]
                 perm = np.lexsort((coords[:, 2], coords[:, 1], coords[:, 0], coords[:, 3]))
-                coords = coords[perm].float()
-                if torch.cuda.is_available():
-                    coords = coords.cuda()
+                coords = coords[perm].float().cuda()
                 feature_map = embedding.features[perm]
-                if depth == 0:
-                    distance_estimation = result['distance_estimation'][i_gpu]
-                    distance_estimation = distance_estimation.features[perm]
+
+                loss_event = defaultdict(list)
+                acc_event = defaultdict(list)
                 for bidx in batch_ids:
                     batch_mask = coords[:, 3] == bidx
                     hypercoordinates = feature_map[batch_mask]
                     slabels_event = slabels_depth[batch_mask]
                     clabels_event = clabels_depth[batch_mask]
                     coords_event = coords[batch_mask]
+                    if depth == 0:
+                        distances_event = distance_estimate[batch_mask]
 
                     # Loop over semantic labels:
                     semantic_classes = slabels_event[:, -1].unique()
                     n_classes = len(semantic_classes)
+                    loss_class = defaultdict(list)
+                    acc_class = defaultdict(list)
+                    acc_avg = 0.0
                     for class_ in semantic_classes:
                         k = int(class_)
                         class_mask = slabels_event[:, -1] == class_
                         embedding_class = hypercoordinates[class_mask]
                         cluster_class = clabels_event[class_mask][:, -1]
-                        attention_weights = self.compute_attention_weight(coords_event[class_mask], cluster_class)
+                        coords_class = coords_event[class_mask][:, :3]
+                        if depth == 0:
+                            distances_class = distances_event[class_mask]
+                            acc = self.compute_heuristic_accuracy(embedding_class,
+                                                                cluster_class)
+                            accuracy['accuracy_{}'.format(k)].append(acc)
+                            acc_avg += acc / n_classes
+                            dMap = self.get_nn_map(embedding_class, cluster_class)
+                            dloss = self.huber_loss(dMap, distances_class) * self.distance_estimate_weight
+                            loss_class['distance_estimation'].append(dloss)
                         # Clustering Loss
-                        acc = self.compute_heuristic_accuracy(embedding_class,
-                                                              cluster_class)
                         closs = self.combine(embedding_class,
                                              cluster_class,
                             intra_margin=self.intra_margins[depth],
-                            inter_margin=self.inter_margins[depth],
-                            attention_weights=attention_weights)
-                        if depth == 0:
-                            nnMap = self.get_nn_map(embedding_class, cluster_class)
-                            nnTruth = distance_estimation[batch_mask][class_mask]
-                            distance_estimate_loss += self.huber_loss(nnMap, nnTruth) * self.distance_estimate_weight
-                            data.update_mean('distance_estimate_loss', distance_estimate_loss)
-                            data.update_mean('distance_estimate_loss_{}'.format(class_), float(distance_estimate_loss))
-                        # Informations to be saved in log file (loss/accuracy). 
-                        data.update_mean('accuracy', acc)
-                        data.update_mean('intra_loss', closs['intra_loss'])
-                        data.update_mean('inter_loss', closs['inter_loss'])
-                        data.update_mean('reg_loss', closs['reg_loss'])
-                        data.update_mean('accuracy_{}'.format(class_), acc)
-                        data.update_mean('intra_loss_{}'.format(class_), closs['intra_loss'])
-                        data.update_mean('inter_loss_{}'.format(class_), closs['inter_loss'])
-                        data.update_mean('clustering_loss', self.clustering_weight * closs['loss'])
+                            inter_margin=self.inter_margins[depth])
+                        for key, val in closs.items():
+                            loss_class[key].append(val)
+                    if depth == 0:
+                        accuracy['accuracy'].append(acc_avg)
+                    for key, val in loss_class.items():
+                        loss_event[key].append(sum(val) / len(val))
+                for key, val in loss_event.items():
+                    loss[key].append(sum(val) / len(val))
 
-        res = data.as_dict()
-        res['loss'] = res['clustering_loss'] + res['distance_estimate_loss']
+        res = {}
+
+        for key, val in loss.items():
+            res[key] = sum(val) / len(val)
+        res['loss'] += res['distance_estimation']
+        res['distance_estimation'] = float(res['distance_estimation'])
+
+        for key, val in accuracy.items():
+            res[key] = sum(val) / len(val)
+
+        print(res)
+
         return res
 
 
