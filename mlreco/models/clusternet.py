@@ -122,6 +122,5 @@ class ClusteringLoss(nn.Module):
         Forward Function for clustering loss , with distance estimation.
         '''
         res = self.loss_func(result, segment_label, cluster_label)
-        print(res)
         return res
 

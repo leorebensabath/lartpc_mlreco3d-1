@@ -51,7 +51,7 @@ class ClusterEmbeddings(NetworkBase):
         self.num_classes = self.model_config.get('num_classes', 5)
         self.N = self.model_config.get('N', 1)
         self.simpleN = self.model_config.get('simple_conv', False)
-        self.embedding_dim = self.model_config.get('embedding_dim', 8)
+        self.embedding_dim = self.model_config.get('embedding_dim', 16)
         self.coordConv = self.model_config.get('coordConv', False)
         self.kernel_size = self.model_config.get('kernel_size', 2)
         self.downsample = [self.kernel_size, 2]
@@ -215,11 +215,11 @@ class ClusterEmbeddingsFPN(ClusterEmbeddings):
 
 
 
-class StackedEmbeddings(NetworkBase):
+class StackedEmbeddings(ClusterEmbeddings):
 
 
-    def __init__(self, cfg, backbone, name='stacked_unet'):
-        super(StackedEmbeddings, self).__init__(cfg, name='network_base')
+    def __init__(self, cfg, backbone, name='embeddings'):
+        super(StackedEmbeddings, self).__init__(cfg, backbone, name=name)
         if 'modules' in cfg:
             self.model_config = cfg['modules'][name]
         else:
@@ -227,6 +227,10 @@ class StackedEmbeddings(NetworkBase):
         
         # Define Backbone Network 
         self.net = backbone
+        if self.simpleN:
+            clusterBlock = self._block
+        else:
+            clusterBlock = self._resnet_block
 
         # StackNet Model Parameters
         self.reduce_feature = self.model_config.get('reduce_feature', 'nin')
@@ -268,7 +272,7 @@ class StackedEmbeddings(NetworkBase):
                     m.add(
                         scn.UnPooling(self.dimension, self.downsample[0], self.downsample[1]))
                 self.unpooling.add(m)
-            self.stackPlanes = [self.sum_features, 100, 20, 2]
+            self.stackPlanes = [self.sum_features, 100, 50, self.num_filters]
 
         self.reduction_layers = scn.Sequential()
         if self.reduce_feature == 'resnet':
@@ -282,12 +286,14 @@ class StackedEmbeddings(NetworkBase):
 
         # Feature Reducing Layers
         self.cluster_decoder = scn.Sequential()
-        for i in range(self.num_strides-1):
+        for i in range(len(self.stackPlanes)-1):
             m = scn.Sequential()
             reduceBlock(m, self.stackPlanes[i], self.stackPlanes[i+1])
             self.cluster_decoder.add(m)
 
         self.concat = scn.JoinTable()
+        self.last_embedding = scn.Sequential()
+        clusterBlock(self.last_embedding, self.num_filters * 2, self.embedding_dim)
     
     def encoder(self, x):
         return self.net.encoder(x)
@@ -320,6 +326,7 @@ class StackedEmbeddings(NetworkBase):
             x_seg = self.net.concat([encoder_feature, x_seg])
             x_seg = self.net.decoding_block[i](x_seg)
             features_dec.append(x_seg)
+            x_emb = self.cluster_conv[i](x_emb)
         # Compensate for last clustering convolution
         if self.coordConv:
             x_emb = add_normalized_coordinates(x_emb)
@@ -337,7 +344,7 @@ class StackedEmbeddings(NetworkBase):
         coords = point_cloud[:, 0:self.dimension+1].float()
         features = point_cloud[:, self.dimension+1:].float()
 
-        x = self.input((coords, features))
+        x = self.net.input((coords, features))
         encoder_output = self.encoder(x)
         features_enc = encoder_output['features_enc']
         deepest_layer = encoder_output['deepest_layer']
@@ -356,11 +363,13 @@ class StackedEmbeddings(NetworkBase):
 
         stack_feature = self.concat(stack_feature)
         out = self.cluster_decoder(stack_feature)
+        out = self.concat([out, cluster_feature[-1]])
+        out = self.last_embedding(out)
+        cluster_feature[-1] = out
 
         res = {
-            'features_dec': features_dec,
-            'cluster_feature': cluster_feature,
-            'final_feature': out
+            'features_dec': [features_dec],
+            'cluster_feature': [cluster_feature[::-1]]
         }
 
         return res
