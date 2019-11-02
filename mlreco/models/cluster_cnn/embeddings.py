@@ -55,6 +55,9 @@ class ClusterEmbeddings(NetworkBase):
         self.coordConv = self.model_config.get('coordConv', False)
         self.kernel_size = self.model_config.get('kernel_size', 2)
         self.downsample = [self.kernel_size, 2]
+        self.num_filters = self.model_config.get('num_filters', 16)
+        self.num_strides = self.model_config.get('num_strides', 5)
+        self.nPlanes = [self.num_filters * (i+1) for i in range(self.num_strides)]
 
         if self.simpleN:
             clusterBlock = self._block
@@ -150,7 +153,7 @@ class ClusterEmbeddings(NetworkBase):
         features = point_cloud[:, self.dimension+1:].float()
         res = {}
 
-        x = self.input((coords, features))
+        x = self.net.input((coords, features))
         encoder_output = self.encoder(x)
         decoder_output = self.decoder(encoder_output['features_enc'],
                                 encoder_output['deepest_layer'])

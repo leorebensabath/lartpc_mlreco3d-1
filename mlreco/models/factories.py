@@ -18,7 +18,6 @@ def model_dict():
     from . import clustercnn_single
     from . import clustercnn_neighbors
     from . import clustercnn_stable
-    from . import clustercnn_fpn
     from . import clustercnn_stack
     from . import clustercnn_distances
 
@@ -60,8 +59,6 @@ def model_dict():
         "clusterunet_affinity": (clustercnn_neighbors.ClusterCNN, clustercnn_neighbors.ClusteringLoss),
         # ClusterUNet Stable (Multiscale loss with attention weighting and voxel-centroid push loss)
         "clusterunet": (clustercnn_stable.ClusterCNN, clustercnn_stable.ClusteringLoss),
-        # ClusterFPN Stable (Multiscale Enhanced Loss with FPN Backbone)
-        "clusterFPN": (clustercnn_fpn.ClusterCNN, clustercnn_fpn.ClusteringLoss),
         # ClusterCNN Stack (Multiscale Enhanced Loss Stacked UResNet)
         "clusterStack": (clustercnn_stack.ClusterCNN, clustercnn_stack.ClusteringLoss),
         # ClusterCNN Distances (Multiscale Enhanced Loss Stacked UResNet with Distance Estimation)

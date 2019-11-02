@@ -25,6 +25,21 @@ def cluster_model_dict():
         "multi": embeddings.ClusterEmbeddings,
         "stack_multi": embeddings.StackedEmbeddings
     }
+    return models
+
+def clustering_loss_dict():
+    '''
+    Returns dictionary of various clustering losses with enhancements.
+    '''
+    losses = {
+        'single': loss.DiscriminativeLoss,
+        'multi': loss.MultiScaleLoss,
+        'multi-weighted': loss.WeightedMultiLoss,
+        'multi-repel': loss.MultiScaleLoss2,
+        'multi-both': loss.EnhancedEmbeddingLoss,
+        'multi-neighbors': loss.NeighborLoss,
+    }
+    return losses
 
 def backbone_construct(name):
     models = backbone_dict()
@@ -37,3 +52,9 @@ def cluster_model_construct(name):
     if not name in models:
         raise Exception("Unknown clustering model name provided")
     return models[name]
+
+def clustering_loss_construct(name):
+    loss_fns = clustering_loss_dict()
+    if not name in loss_fns:
+        raise Exception("Unknown clustering loss function name provided")
+    return loss_fns[name]

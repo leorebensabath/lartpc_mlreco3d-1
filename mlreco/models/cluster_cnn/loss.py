@@ -215,12 +215,14 @@ class DiscriminativeLoss(torch.nn.Module):
             index = (slabels == sc)
             num_clusters = len(clabels[index].unique())
             loss_blob = self.combine(features[index], clabels[index], **kwargs)
-            loss['loss'].append(loss_blob['loss'])
-            loss['intra_loss'].append(loss_blob['intra_loss'])
-            loss['inter_loss'].append(loss_blob['inter_loss'])
-            loss['reg_loss'].append(loss_blob['reg_loss'])
+            for key, val in loss_blob.items():
+                loss[key].append(val)
+            # loss['loss'].append(loss_blob['loss'])
+            # loss['intra_loss'].append(loss_blob['intra_loss'])
+            # loss['inter_loss'].append(loss_blob['inter_loss'])
+            # loss['reg_loss'].append(loss_blob['reg_loss'])
             acc = self.compute_heuristic_accuracy(features[index], clabels[index])
-            acc_segs[sc.item()] = acc
+            acc_segs['accuracy_{}'.format(sc.item())] = acc
         return loss, acc_segs
 
     def forward(self, out, semantic_labels, group_labels):
@@ -255,47 +257,28 @@ class DiscriminativeLoss(torch.nn.Module):
                 if self.use_segmentation:
                     loss_dict, acc_segs = self.combine_multiclass(
                         embedding_batch, slabels_batch, clabels_batch, **self.loss_hyperparams)
-                    loss["loss"].append(
-                        sum(loss_dict["loss"]) / float(len(loss_dict["loss"])))
-                    loss["intra_loss"].append(
-                        sum(loss_dict["intra_loss"]) / float(len(loss_dict["intra_loss"])))
-                    loss["inter_loss"].append(
-                        sum(loss_dict["inter_loss"]) / float(len(loss_dict["inter_loss"])))
-                    loss["reg_loss"].append(
-                        sum(loss_dict["reg_loss"]) / float(len(loss_dict["reg_loss"])))
+                    for key, val in loss_dict.items():
+                        loss[key].append(sum(val) / len(val))
                     for s, acc in acc_segs.items():
                         accuracy[s].append(acc)
+                    acc = sum(acc_segs.values()) / len(acc_segs.values())
+                    accuracy['accuracy'].append(acc)
                 else:
                     loss["loss"].append(self.combine(embedding_batch, clabels_batch, **self.loss_hyperparams))
                     acc, _ = self.compute_heuristic_accuracy(embedding_batch, clabels_batch)
-                    accuracy.append(acc)
+                    accuracy['accuracy'].append(acc)
+        
+        loss_avg = {}
+        acc_avg = defaultdict(float)
 
-        clustering_loss = sum(loss["loss"]) / (nbatch * num_gpus)
-        intra_loss = sum(loss["intra_loss"]) / (nbatch * num_gpus)
-        inter_loss = sum(loss["inter_loss"]) / (nbatch * num_gpus)
-        reg_loss = sum(loss["reg_loss"]) / (nbatch * num_gpus)
-        acc_segs = defaultdict(float)
-        acc_avg = []
-        for i in range(self.num_classes):
-            if accuracy[i]:
-                acc_segs[i] = sum(accuracy[i]) / float(len(accuracy[i]))
-                acc_avg.append(acc_segs[i])
-            else:
-                acc_segs[i] = 0.0
-        acc_avg = sum(acc_avg) / float(len(acc_avg))
+        for key, val in loss.items():
+            loss_avg[key] = sum(val) / len(val)
+        for key, val in accuracy.items():
+            acc_avg[key] = sum(val) / len(val)
 
-        res = {
-            "loss": clustering_loss,
-            "intra_loss": intra_loss,
-            "inter_loss": inter_loss,
-            "reg_loss": reg_loss,
-            "accuracy": acc_avg,
-            "acc_0": acc_segs[0],
-            "acc_1": acc_segs[1],
-            "acc_2": acc_segs[2],
-            "acc_3": acc_segs[3],
-            "acc_4": acc_segs[4]
-        }
+        res = {}
+        res.update(loss_avg)
+        res.update(acc_avg)
 
         return res
 
@@ -347,20 +330,16 @@ class MultiScaleLoss(DiscriminativeLoss):
             if self.use_segmentation:
                 loss_dict, acc_segs = self.combine_multiclass(
                     embedding_batch, slabels_batch, clabels_batch, **kwargs)
-                loss["loss"].append(
-                    sum(loss_dict["loss"]) / float(len(loss_dict["loss"])))
-                loss["intra_loss"].append(
-                    sum(loss_dict["intra_loss"]) / float(len(loss_dict["intra_loss"])))
-                loss["inter_loss"].append(
-                    sum(loss_dict["inter_loss"]) / float(len(loss_dict["inter_loss"])))
-                loss["reg_loss"].append(
-                    sum(loss_dict["reg_loss"]) / float(len(loss_dict["reg_loss"])))
+                for key, val in loss_dict.items():
+                    loss[key].append( sum(val) / float(len(val)) )
                 for s, acc in acc_segs.items():
                     accuracy[s].append(acc)
+                acc = sum(acc_segs.values()) / len(acc_segs.values())
+                accuracy['accuracy'].append(acc)
             else:
                 loss["loss"].append(self.combine(embedding_batch, clabels_batch, **kwargs))
                 acc = self.compute_heuristic_accuracy(embedding_batch, clabels_batch)
-                accuracy.append(acc)
+                accuracy['accuracy'].append(acc)
 
         # Averaged over batch at each layer
         loss = { key : sum(l) / float(len(l)) for key, l in loss.items() }
@@ -382,7 +361,7 @@ class MultiScaleLoss(DiscriminativeLoss):
         '''
 
         loss = defaultdict(list)
-        accuracy = defaultdict(float)
+        accuracy = defaultdict(list)
         num_gpus = len(semantic_labels)
         num_layers = len(out['cluster_feature'][0])
 
@@ -403,31 +382,280 @@ class MultiScaleLoss(DiscriminativeLoss):
                     acc_clustering = acc_i
             for key, acc in acc_clustering.items():
                 # Batch Averaged Accuracy
-                accuracy[key] = float(acc)
+                accuracy[key].append(acc)
 
         # Average over layers and num_gpus
-        clustering_loss = sum(loss["loss"]) / (num_layers * num_gpus)
-        intra_loss = sum(loss["intra_loss"]) / (num_layers * num_gpus)
-        inter_loss = sum(loss["inter_loss"]) / (num_layers * num_gpus)
-        reg_loss = sum(loss["reg_loss"]) / (num_layers * num_gpus)
+        loss_avg = {}
+        acc_avg = {}
+        for key, val in loss.items():
+            loss_avg[key] = sum(val) / len(val)
+        for key, val in accuracy.items():
+            acc_avg[key] = sum(val) / len(val)
 
-        total_acc = sum(accuracy.values()) / len(accuracy.keys())
-        accuracy['accuracy'] = total_acc
-
-        res = {
-            "loss": clustering_loss,
-            "intra_loss": intra_loss,
-            "reg_loss": reg_loss,
-            "inter_loss": inter_loss,
-            "acc_0": accuracy[0],
-            "acc_1": accuracy[1],
-            "acc_2": accuracy[2],
-            "acc_3": accuracy[3],
-            "acc_4": accuracy[4],
-            "accuracy": accuracy['accuracy']
-        }
+        res = {}
+        res.update(loss_avg)
+        res.update(acc_avg)
 
         return res
+
+
+class MultiScaleLoss2(MultiScaleLoss):
+    '''
+    Same as multi scale loss, but we include enemy loss in intra loss.
+    '''
+    def __init__(self, cfg, name='clustering_loss'):
+        super(MultiScaleLoss2, self).__init__(cfg, name=name)
+        self.ally_weight = self.loss_config.get('ally_weight', 1.0)
+        self.enemy_weight = self.loss_config.get('enemy_weight', 1.0)
+
+
+    def intra_cluster_loss(self, features, labels, cluster_means,
+                           ally_margin=0.5, enemy_margin=1.0):
+        '''
+        Intra-cluster loss, with per-voxel weighting and enemy loss.
+        This variant of intra-cluster loss penalizes the distance 
+        from the centroid to its enemies in addition to pulling 
+        ally points towards the center. 
+
+        INPUTS:
+            - ally_margin (float): centroid pulls all allied points
+            inside this margin.
+            - enemy_margin (float): centroid pushs all enemy points
+            inside this margin.
+            - weight: 
+        '''
+        intra_loss = 0.0
+        ally_loss, enemy_loss = 0.0, 0.0
+        n_clusters = len(cluster_means)
+        cluster_labels = labels.unique(sorted=True)
+        for i, c in enumerate(cluster_labels):
+            index = (labels == c)
+            allies = torch.norm(features[index] - cluster_means[i] + 1e-8,
+                               p=self.norm, dim=1)
+            allies = torch.clamp(allies - ally_margin, min=0)
+            x = self.ally_weight * torch.mean(torch.pow(allies, 2))
+            intra_loss += x
+            ally_loss += float(x)
+            if index.all():
+                continue
+            enemies = torch.norm(features[~index] - cluster_means[i] + 1e-8,
+                    p=self.norm, dim=1)
+            enemies = torch.clamp(enemy_margin - enemies, min=0)
+            x = self.enemy_weight * torch.mean(torch.pow(enemies, 2))
+            intra_loss += x
+            enemy_loss += x
+
+        intra_loss /= n_clusters
+        ally_loss /= n_clusters
+        enemy_loss /= n_clusters
+        return intra_loss, ally_loss, enemy_loss
+
+
+    def combine(self, features, labels, **kwargs):
+        '''
+        Wrapper function for combining different components of the loss function.
+        Inputs:
+            features (torch.Tensor): pixel embeddings
+            labels (torch.Tensor): ground-truth instance labels
+        Returns:
+            loss: combined loss, in most cases over a given semantic class.
+        '''
+        # Clustering Loss Hyperparameters
+        # We allow changing the parameters at each computation in order
+        # to alter the margins at each spatial resolution in multi-scale losses. 
+        ally_margin = kwargs.get('ally_margin', 0.5)
+        enemy_margin = kwargs.get('enemy_margin', 1.0)
+        inter_margin = kwargs.get('inter_margin', 1.5)
+        intra_weight = kwargs.get('intra_weight', 1.0)
+        inter_weight = kwargs.get('inter_weight', 1.0)
+        reg_weight = kwargs.get('reg_weight', 0.001)
+
+        c_means = self.find_cluster_means(features, labels)
+        inter_loss = self.inter_cluster_loss(c_means, margin=inter_margin)
+        intra_loss, ally_loss, enemy_loss = self.intra_cluster_loss(features,
+                                           labels,
+                                           c_means,
+                                           ally_margin=ally_margin,
+                                           enemy_margin=enemy_margin)
+        reg_loss = self.regularization(c_means)
+
+        loss = intra_weight * intra_loss + inter_weight \
+            * inter_loss + reg_weight * reg_loss
+
+        return {
+            'loss': loss, 
+            'intra_loss': intra_weight * float(intra_loss),
+            'inter_loss': inter_weight * float(inter_loss),
+            'reg_loss': reg_weight * float(reg_loss),
+            'ally_loss': intra_weight * float(ally_loss),
+            'enemy_loss': intra_weight * float(enemy_loss)
+        }
+
+
+class WeightedMultiLoss(MultiScaleLoss):
+    '''
+    Same as MultiScaleLoss, but with attention weighting.
+    '''
+    def __init__(self, cfg, name='clustering_loss'):
+        super(WeightedMultiLoss, self).__init__()
+        self.attention_kernel = self.loss_config.get('attention_kernel', 1)
+        if self.attention_kernel == 0:
+            self.kernel_func = lambda x: 1.0 + torch.exp(-x)
+        elif self.attention_kernel == 1:
+            self.kernel_func = lambda x: 2.0 / (1 + torch.exp(-x))
+        else:
+            raise ValueError('Invalid weighting kernel function mode.')
+
+
+    def intra_cluster_loss(self, features, labels, cluster_means, coords):
+        '''
+        Intra-cluster loss, with per-voxel weighting and enemy loss.
+        This variant of intra-cluster loss penalizes the distance 
+        from the centroid to its enemies in addition to pulling 
+        ally points towards the center. 
+
+        INPUTS:
+            - ally_margin (float): centroid pulls all allied points
+            inside this margin.
+            - enemy_margin (float): centroid pushs all enemy points
+            inside this margin.
+            - weight: Tensor with features.shape[0] entries corresponding to
+            attention weights. 
+        '''
+        intra_loss = 0.0
+        ally_loss, enemy_loss = 0.0, 0.0
+        n_clusters = len(cluster_means)
+        cluster_labels = labels.unique(sorted=True)
+        with torch.no_grad():
+            coords_mean = self.find_cluster_means(coords, labels)
+        for i, c in enumerate(cluster_labels):
+            index = (labels == c)
+            allies = torch.norm(features[index] - cluster_means[i] + 1e-8,
+                               p=self.norm, dim=1)
+            allies = torch.clamp(allies - ally_margin, min=0)
+            with torch.no_grad():
+                dists = torch.norm(coords[index] - coords_mean[i] + 1e-8,
+                                    p=self.norm, dim=1) / self.spatial_size
+                weight = self.kernel_func(dists)
+            intra_loss += torch.mean(weight[index] * torch.pow(allies, 2))
+
+        intra_loss /= n_clusters
+        return intra_loss
+
+
+    def combine(self, features, labels, **kwargs):
+        '''
+        Wrapper function for combining different components of the loss function.
+        Inputs:
+            features (torch.Tensor): pixel embeddings
+            labels (torch.Tensor): ground-truth instance labels
+        Returns:
+            loss: combined loss, in most cases over a given semantic class.
+        '''
+        # Clustering Loss Hyperparameters
+        # We allow changing the parameters at each computation in order
+        # to alter the margins at each spatial resolution in multi-scale losses. 
+        inter_margin = kwargs.get('inter_margin', 1.5)
+        intra_weight = kwargs.get('intra_weight', 1.0)
+        inter_weight = kwargs.get('inter_weight', 1.0)
+        reg_weight = kwargs.get('reg_weight', 0.001)
+        coords = kwargs['coords']
+
+        c_means = self.find_cluster_means(features, labels)
+        inter_loss = self.inter_cluster_loss(c_means, margin=inter_margin)
+        intra_loss, ally_loss, enemy_loss = self.intra_cluster_loss(features,
+                                           labels,
+                                           c_means,
+                                           coords)
+        reg_loss = self.regularization(c_means)
+
+        loss = intra_weight * intra_loss + inter_weight \
+            * inter_loss + reg_weight * reg_loss
+
+        return {
+            'loss': loss, 
+            'intra_loss': intra_weight * float(intra_loss),
+            'inter_loss': inter_weight * float(inter_loss),
+            'reg_loss': reg_weight * float(reg_loss),
+            'ally_loss': intra_weight * float(ally_loss),
+            'enemy_loss': intra_weight * float(enemy_loss)
+        }
+
+
+    def forward(self, result, segment_label, cluster_label):
+        '''
+        Mostly borrowed from uresnet_clustering.py
+        '''
+        num_gpus = len(segment_label)
+        loss, accuracy = defaultdict(list), defaultdict(list)
+
+        # Loop first over scaled feature maps
+        for i_gpu in range(num_gpus):
+            for depth in range(self.depth):
+
+                batch_ids = segment_label[i_gpu][depth][:, 3].detach().cpu().int().numpy()
+                batch_ids = np.unique(batch_ids)
+                batch_size = len(batch_ids)
+
+                embedding = result['cluster_feature'][i_gpu][depth]
+                clabels_depth = cluster_label[i_gpu][depth]
+                slabels_depth = segment_label[i_gpu][depth]
+
+                coords = embedding.get_spatial_locations()[:, :4]
+                perm = np.lexsort((coords[:, 2], coords[:, 1], coords[:, 0], coords[:, 3]))
+                coords = coords[perm].float().cuda()
+                feature_map = embedding.features[perm]
+
+                loss_event = defaultdict(list)
+                acc_event = defaultdict(list)
+                for bidx in batch_ids:
+                    batch_mask = coords[:, 3] == bidx
+                    hypercoordinates = feature_map[batch_mask]
+                    slabels_event = slabels_depth[batch_mask]
+                    clabels_event = clabels_depth[batch_mask]
+                    coords_event = coords[batch_mask]
+
+                    # Loop over semantic labels:
+                    semantic_classes = slabels_event[:, -1].unique()
+                    n_classes = len(semantic_classes)
+                    loss_class = defaultdict(list)
+                    acc_class = defaultdict(list)
+                    acc_avg = 0.0
+                    for class_ in semantic_classes:
+                        k = int(class_)
+                        class_mask = slabels_event[:, -1] == class_
+                        embedding_class = hypercoordinates[class_mask]
+                        cluster_class = clabels_event[class_mask][:, -1]
+                        coords_class = coords_event[class_mask][:, :3]
+                        # Clustering Loss
+                        if depth == 0:
+                            acc = self.compute_heuristic_accuracy(embedding_class,
+                                                                cluster_class)
+                            accuracy['accuracy_{}'.format(k)].append(acc)
+                            acc_avg += acc / n_classes
+                        closs = self.combine(embedding_class,
+                                             cluster_class,
+                            intra_margin=self.intra_margins[depth],
+                            inter_margin=self.inter_margins[depth],
+                            coords=coords_class)
+                        for key, val in closs.items():
+                            loss_class[key].append(key)
+                    accuracy['accuracy'].append(acc_avg)
+                    for key, val in loss_class.items():
+                        loss_event[key].append(sum(val) / len(val))
+                for key, val in loss_event.items():
+                    loss[key].append(sum(val) / len(val))
+                    
+        res = {}
+
+        for key, val in loss.items():
+            res[key] = sum(val) / len(val)
+
+        for key, val in accuracy.items():
+            res[key] = sum(val) / len(val)
+
+        return res
+
 
 
 class NeighborLoss(MultiScaleLoss):

@@ -3,7 +3,7 @@ import torch.nn as nn
 import numpy as np
 import sparseconvnet as scn
 
-from .cluster_cnn import cluster_model_construct, backbone_construct
+from .cluster_cnn import cluster_model_construct, backbone_construct, clustering_loss_construct
 from mlreco.models.layers.uresnet import UResNet
 from mlreco.models.layers.fpn import FPN
 from mlreco.models.layers.base import NetworkBase
@@ -51,15 +51,16 @@ class ClusterCNN(NetworkBase):
         self.proximity_config = self.model_config.get('proximity', None)
 
         # Construct Backbone
-        net = backbone_construct(self.backbone_config.get('name', 'uresnet'))
-        self.net = net(self.backbone_config)
+        backbone_name = self.backbone_config.get('name', 'uresnet')
+        net = backbone_construct(backbone_name)
+        self.net = net(cfg, name=backbone_name)
         self.num_filters = self.net.num_filters
 
         # Add N-Convolutions for Clustering
         if self.clustering_config is not None:
             clusternet = cluster_model_construct(
-                self.clustering_config.get('name', 'clusternet'))
-            self.net = clusternet(self.clustering_config, self.net)
+                self.clustering_config.get('name', 'multi'))
+            self.net = clusternet(cfg, self.net, name='embeddings')
         
         # Add Distance Estimation Layer
         if self.proximity_config is not None:
@@ -77,13 +78,15 @@ class ClusterCNN(NetworkBase):
                     num_output = self.num_filters
                 distanceBlock(self.distance_estimate, self.num_filters, num_output)
 
+        print(self)
+
 
     def forward(self, input):
         '''
 
         '''
-
-        pass
+        result = self.net(input)
+        return result
 
 
 class ClusteringLoss(nn.Module):
@@ -102,4 +105,22 @@ class ClusteringLoss(nn.Module):
         - configurations for distance estimation loss.
     ----------------------------------------------------------
     '''
-    pass
+    def __init__(self, cfg, name='clustering_loss'):
+        super(ClusteringLoss, self).__init__()
+
+        if 'modules' in cfg:
+            self.loss_config = cfg['modules'][name]
+        else:
+            self.loss_config = cfg
+
+        self.loss_func_name = self.loss_config.get('name', 'multi')
+        self.loss_func = clustering_loss_construct(self.loss_func_name)
+        self.loss_func = self.loss_func(cfg)
+
+    def forward(self, result, segment_label, cluster_label):
+        '''
+        Forward Function for clustering loss , with distance estimation.
+        '''
+        res = self.loss_func(result, segment_label, cluster_label)
+        return res
+
