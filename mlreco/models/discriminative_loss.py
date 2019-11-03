@@ -56,8 +56,7 @@ class UResNet(torch.nn.Module):
             emb = self.sparseModel((coords, features))
         x = self.linear(emb)
         return {
-            'segmentation': [x],
-            'cluster_feature': [emb]
+            'cluster_feature': [x]
         }
 
 

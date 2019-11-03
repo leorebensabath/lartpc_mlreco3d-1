@@ -37,8 +37,8 @@ def clustering_loss_dict():
         'multi': loss.MultiScaleLoss,
         'multi-weighted': loss.WeightedMultiLoss,
         'multi-repel': loss.MultiScaleLoss2,
-        'multi-both': loss.EnhancedEmbeddingLoss,
-        'multi-neighbors': loss.NeighborLoss,
+        # NOTE: Not Yet Working 'multi-both': loss.EnhancedEmbeddingLoss,
+        # NOTE: Not Yet Working 'multi-neighbors': loss.NeighborLoss,
         'multi-distance': loss.DistanceEstimationLoss
     }
     return losses
