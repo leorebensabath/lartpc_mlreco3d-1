@@ -26,7 +26,7 @@ from sklearn.cluster import DBSCAN
 class BinarySearchDBSCAN:
 
     def __init__(self, bounds=(0.01, 3.0), min_samples=5, 
-                 iterations=100, efficiency_bound=0.9, tolerance=0.01):
+                 iterations=30, efficiency_bound=0.9, tolerance=0.01):
         self.lower_bound = bounds[0]
         self.upper_bound = bounds[1]
         self.eps = (self.lower_bound + self.upper_bound) / 2
@@ -170,10 +170,13 @@ def main_loop(train_cfg, **kwargs):
         semantic_labels = data_blob['segment_label'][0][:, -1]
         cluster_labels = data_blob['cluster_label'][0][:, -1]
         coords = data_blob['input_data'][0][:, :3]
-        perm = np.lexsort((coords[:, 2], coords[:, 1], coords[:, 0]))
-        embedding = embedding[:, 4:][perm]
-        coords = coords[perm]
-        index = data_blob['index'][0][0]
+        #perm = np.lexsort((coords[:, 2], coords[:, 1], coords[:, 0]))
+        # embedding = embedding[perm]
+        # coords = coords[perm]
+        # print(coords)
+        # print(data_blob['segment_label'][0])
+        # print(data_blob['cluster_label'][0])
+        index = data_blob['index'][0]
 
         acc_dict = {}
         eps, min_samples = kwargs['eps'], kwargs['min_samples']

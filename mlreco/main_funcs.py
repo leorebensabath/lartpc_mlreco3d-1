@@ -289,7 +289,7 @@ def train_loop(cfg, handlers):
         tsum += handlers.watch.time('iteration')
 
         log(handlers, tstamp_iteration,
-            tsum, result_blob, cfg, epoch, data_blob['index'][0][0])
+            tsum, result_blob, cfg, epoch, data_blob['index'][0])
         # Log metrics/do analysis
         #if 'analysis' in cfg['model']:
         #    for ana_script in cfg['model']['analysis']:

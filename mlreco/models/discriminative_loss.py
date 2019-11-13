@@ -17,7 +17,7 @@ class UResNet(torch.nn.Module):
         model_config = cfg['modules']['discriminative_loss']
         dimension = model_config['data_dim']
         self.spatial_size = model_config['spatial_size']
-        reps = 2  # Conv block repetition factor
+        reps = model_config.get('reps', 2)  # Conv block repetition factor
         kernel_size = 2  # Use input_spatial_size method for other values?
         m = model_config['filters']  # Unet number of features
         nPlanes = [i * m for i in range(1, model_config['num_strides'] + 1)]
