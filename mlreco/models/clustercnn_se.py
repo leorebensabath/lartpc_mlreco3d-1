@@ -3,8 +3,8 @@ import torch.nn as nn
 import numpy as np
 import sparseconvnet as scn
 
-from .cluster_cnn.loss import SpatialEmbeddingsLoss, SpatialEmbeddingsLoss2
 from .cluster_cnn.spatial_embeddings import SpatialEmbeddings1
+from .cluster_cnn.losses.spatial_embeddings import *
 
 
 class ClusterCNN(SpatialEmbeddings1):
@@ -19,15 +19,20 @@ class ClusterCNN(SpatialEmbeddings1):
     def __init__(self, cfg):
         super(ClusterCNN, self).__init__(cfg)
 
-class ClusteringLoss(SpatialEmbeddingsLoss):
-    '''
-    Vanilla discriminative clustering loss applied to final embedding layer.
-    '''
+
+class ClusteringLoss1(MaskBCELoss2):
+
     def __init__(self, cfg, name='clustering_loss'):
-        super(ClusteringLoss, self).__init__(cfg)
+        super(ClusteringLoss1, self).__init__(cfg)
 
 
-class ClusteringLoss2(SpatialEmbeddingsLoss2):
+class ClusteringLoss2(MaskBCELossBivariate):
 
     def __init__(self, cfg, name='clustering_loss'):
         super(ClusteringLoss2, self).__init__(cfg)
+
+
+class ClusteringLoss3(MaskLovaszHingeLoss):
+    
+    def __init__(self, cfg, name='clustering_loss'):
+        super(ClusteringLoss3, self).__init__(cfg)

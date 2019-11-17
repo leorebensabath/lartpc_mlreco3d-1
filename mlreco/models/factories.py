@@ -17,12 +17,12 @@ def model_dict():
 
     from . import discriminative_loss
     from . import clustercnn_single
-    from . import clustercnn_neighbors
     from . import clustercnn_stable
     from . import clustercnn_stack
     from . import clustercnn_distances
     from . import clustercnn_offset
     from . import clustercnn_se
+    from . import clustercnn_density
 
     from . import clusternet
 
@@ -62,8 +62,6 @@ def model_dict():
         "clustercnn_offset": (discriminative_loss.UResNet, clustercnn_offset.ClusteringLoss),
         # Same as ClusterUNet Single, but coordinate concat is done in first input layer.
         "discriminative_loss": (discriminative_loss.UResNet, discriminative_loss.DiscriminativeLoss),
-        # ClusterUNet Affinity (NOTE: Unstable training due to GPU memory issues)
-        "clusterunet_affinity": (clustercnn_neighbors.ClusterCNN, clustercnn_neighbors.ClusteringLoss),
         # ClusterUNet Stable (Multiscale loss with attention weighting and voxel-centroid push loss)
         "clusterunet": (clustercnn_stable.ClusterCNN, clustercnn_stable.ClusteringLoss),
         # ClusterCNN Stack (Multiscale Enhanced Loss Stacked UResNet)
@@ -72,10 +70,14 @@ def model_dict():
         "clustercnn_distances": (clustercnn_distances.ClusterCNN, clustercnn_distances.ClusteringLoss),
         # Colossal ClusterNet Model to Wrap them all
         "clusternet": (clusternet.ClusterCNN, clusternet.ClusteringLoss),
+        # Density Loss
+        "clustercnn_density": (clustercnn_density.ClusterCNN, clustercnn_density.ClusteringLoss),
         # Spatial Embeddings
-        "spatial_embeddings": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss),
-        # Spatial Embeddings 2
-        "spatial_embeddings2": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss2)
+        "spatial_embeddings": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss1),
+        # Spatial Embeddings Ellipse
+        "spatial_embeddings_ellipse": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss2),
+        # Spatial Embeddings Lovasz
+        "spatial_embeddings_lovasz": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss3)
     }
     # "chain_gnn": (chain_gnn.Chain, chain_gnn.ChainLoss)
     return models
