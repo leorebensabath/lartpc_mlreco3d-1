@@ -44,7 +44,7 @@ class StackUNet(UResNet):
                 m = scn.Sequential()
                 for _ in range(self.num_strides-1-i):
                     m.add(
-                        scn.UnPooling(self.dimension, downsample[0], downsample[1]))
+                        scn.UnPooling(self.dimension, self.downsample[0], self.downsample[1]))
                 self.unpooling.add(m)
             self.stackPlanes = [i * int(self.sum_features / self.num_strides) \
                 for i in range(self.num_strides, 0, -1)]
@@ -61,7 +61,8 @@ class StackUNet(UResNet):
 
         # Feature Reducing Layers
         self.cluster_decoder = scn.Sequential()
-        for i in range(self.num_strides-1):
+        self.stackPlanes.append(self.num_filters)
+        for i in range(self.num_strides):
             m = scn.Sequential()
             reduceBlock(m, self.stackPlanes[i], self.stackPlanes[i+1])
             self.cluster_decoder.add(m)

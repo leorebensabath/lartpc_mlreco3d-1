@@ -74,6 +74,8 @@ def model_dict():
         "clustercnn_density": (clustercnn_density.ClusterCNN, clustercnn_density.ClusteringLoss),
         # Spatial Embeddings
         "spatial_embeddings": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss1),
+        # Spatial Embeddings Stack
+        "spatial_embeddings_stack": (clustercnn_se.ClusterCNN2, clustercnn_se.ClusteringLoss1),
         # Spatial Embeddings Ellipse
         "spatial_embeddings_ellipse": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss2),
         # Spatial Embeddings Lovasz

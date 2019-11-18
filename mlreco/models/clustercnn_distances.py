@@ -26,6 +26,8 @@ class ClusterCNN(ClusterUNet):
         else:
             raise ValueError('Invalid convolution block mode.')
 
+        self.distance_conv = scn.Sequential()
+        distanceBlock(self.distance_conv, 2 * feature_size, feature_size)
         self.distance_branch = scn.Sequential()
         for i in range(self.N_dist):
             m = scn.Sequential()
@@ -61,7 +63,10 @@ class ClusterCNN(ClusterUNet):
         res['cluster_feature'] = [decoder_output['cluster_feature'][::-1]]
         res['final_embedding'] = [decoder_output['final_embedding']]
 
-        distance_estimation = self.distance_branch(decoder_output['cluster_feature'][-1])
+        distance_input = self.concat([decoder_output['features_dec'][-1], decoder_output['cluster_feature'][-1]])
+        distance_input = self.distance_conv(distance_input)
+
+        distance_estimation = self.distance_branch(distance_input)
         res['distance_estimation'] = [distance_estimation]
 
         return res

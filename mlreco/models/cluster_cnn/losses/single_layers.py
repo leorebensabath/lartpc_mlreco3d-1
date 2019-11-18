@@ -6,7 +6,6 @@ import numpy as np
 import sparseconvnet as scn
 
 from collections import defaultdict
-from mlreco.models.cluster_cnn.utils import distance_matrix, pairwise_distances
 
 
 class DiscriminativeLoss(torch.nn.Module):
