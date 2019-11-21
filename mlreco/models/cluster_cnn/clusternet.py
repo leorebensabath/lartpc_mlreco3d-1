@@ -144,6 +144,7 @@ class ClusterUNet(UResNet):
         res['features_dec'] = [decoder_output['features_dec']]
         # Reverse cluster feature tensor list to agree with label ordering.
         res['cluster_feature'] = [decoder_output['cluster_feature'][::-1]]
+        res['final_embedding'] = [decoder_output['final_embedding']]
 
         return res
 

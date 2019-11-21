@@ -5,7 +5,8 @@ import os, re
 import torch
 import yaml
 import time
-
+from scipy.spatial.distance import cdist
+from sklearn.metrics import adjusted_rand_score as ari
 from pathlib import Path
 import argparse
 
@@ -19,84 +20,6 @@ from mlreco.trainval import trainval
 from mlreco.main_funcs import process_config
 from mlreco.iotools.factories import loader_factory
 from mlreco.main_funcs import cycle
-
-from sklearn.cluster import DBSCAN
-
-
-class BinarySearchDBSCAN:
-
-    def __init__(self, bounds=(0.01, 3.0), min_samples=5, 
-                 iterations=30, efficiency_bound=0.9, tolerance=0.01):
-        self.lower_bound = bounds[0]
-        self.upper_bound = bounds[1]
-        self.eps = (self.lower_bound + self.upper_bound) / 2
-        self.min_samples = min_samples
-        self.iterations = iterations
-        self.efficiency_bound = efficiency_bound
-        self.tolerance = tolerance
-        self.optimal_eps = self.eps
-        self.max_purity = 0.0
-        self.purity = 0.
-        self.efficiency = 0.
-
-    def set_bounds(self, bounds):
-        self.lower_bound = bounds[0]
-        self.upper_bound = bounds[1]
-    
-    def optimize(self, train_cfg, gpu=0, num_events=256):
-        '''
-        Optimize on purity value for epsilon with minimum
-        required efficiency.
-        '''
-        params = {
-            'eps': self.eps, 
-            'min_samples': self.min_samples,
-            'gpu': str(gpu), 
-            'iterations': num_events
-        }
-        for i in range(self.iterations):
-            print('Current eps = {:.4f}'.format(self.eps))
-            print('Bounds = ({:.4f}, {:.4f})'.format(self.lower_bound, self.upper_bound))
-            print('Purity = {}, Efficiency = {}'.format(self.purity, self.efficiency))
-            params['eps'] = self.eps
-            data = main_loop(train_cfg, **params)
-            median = data.median()
-            purity, efficiency = median['Purity'], median['Efficiency']
-            self.purity = purity
-            self.efficiency = efficiency
-            if (abs(self.lower_bound - self.upper_bound) < self.tolerance) \
-             and efficiency > self.efficiency_bound:
-                print('Binary search converged with {} iterations.'.format(i))
-                print('Optimal eps = {:.4f}'.format(self.eps))
-                print('Purity = {:.4f}'.format(purity))
-                print('Efficiency = {:.4f}'.format(efficiency))
-                break
-            if efficiency < self.efficiency_bound:
-                self.max_purity = 0.0
-                self.lower_bound = self.eps
-                self.eps = (self.upper_bound + self.eps) / 2
-                self.optimal_eps = self.eps
-            else:
-                self.upper_bound = self.eps
-                self.eps = (self.lower_bound + self.eps) / 2
-                self.optimal_eps = self.eps
-        return data
-
-
-def join_training_logs(log_dir):
-
-    training_logs = sorted([os.path.join(log_dir, fname) \
-        for fname in os.listdir(log_dir)])
-    data = pd.DataFrame()
-    df_temp = pd.read_csv(training_logs[0])
-    for fname in training_logs[1:]:
-        df = pd.read_csv(fname)
-        start_iter = df['iter'].min()
-        data = pd.concat([data, df_temp[df_temp['iter'] < start_iter]], ignore_index=True)
-        df_temp = df
-    data = pd.concat([data, df_temp])
-
-    return data
 
 
 def make_inference_cfg(train_cfg, gpu=1, iterations=128, snapshot=None):
@@ -127,6 +50,8 @@ def make_inference_cfg(train_cfg, gpu=1, iterations=128, snapshot=None):
     inference_cfg['model']["analysis_keys"] = {
         "segmentation": 0,
         "clustering": 1,
+        "seediness": 2,
+        "margins": 3
     }
     
     # Get latest model path if checkpoint not provided.
@@ -143,8 +68,73 @@ def make_inference_cfg(train_cfg, gpu=1, iterations=128, snapshot=None):
     return inference_cfg
 
 
-def cluster_remainder():
-    pass
+def gaussian_kernel(centroid, sigma):
+    def f(x):
+        dists = np.sum(np.power(x - centroid, 2), axis=1, keepdims=False)
+        probs = np.exp(-dists / (2.0 * sigma**2))
+        return probs
+    return f
+
+
+def find_cluster_means(features, labels):
+    '''
+    For a given image, compute the centroids \mu_c for each
+    cluster label in the embedding space.
+
+    INPUTS:
+        features (torch.Tensor) - the pixel embeddings, shape=(N, d) where
+        N is the number of pixels and d is the embedding space dimension.
+
+        labels (torch.Tensor) - ground-truth group labels, shape=(N, )
+
+    OUTPUT:
+        cluster_means (torch.Tensor) - (n_c, d) tensor where n_c is the number of
+        distinct instances. Each row is a (1,d) vector corresponding to
+        the coordinates of the i-th centroid.
+    '''
+    group_ids = sorted(np.unique(labels).astype(int))
+    cluster_means = []
+    #print(group_ids)
+    for c in group_ids:
+        index = labels.astype(int) == c
+        mu_c = features[index].mean(0)
+        cluster_means.append(mu_c)
+    cluster_means = np.vstack(cluster_means)
+    return group_ids, cluster_means
+
+
+def cluster_remainder(embedding, semi_predictions):
+    if sum(semi_predictions == -1) == 0 or sum(semi_predictions != -1) == 0:
+        return semi_predictions
+    group_ids, predicted_cmeans = find_cluster_means(
+        embedding, semi_predictions)
+    semi_predictions[semi_predictions == -1] = np.argmin(
+        cdist(embedding[semi_predictions == -1], predicted_cmeans[1:]), axis=1)
+    return semi_predictions
+
+
+def fit_predict(embeddings, seediness, margins, threshold=0.9, cluster_all=False):
+    pred_labels = -np.ones(embeddings.shape[0])
+    seediness_copy = np.copy(seediness).squeeze(1)
+    check_completion = 0
+    c = 0
+    while check_completion <= embeddings.shape[0]:
+        i = np.argsort(seediness_copy)[::-1][0]
+        seedScore = seediness[i]
+        if seedScore < threshold:
+            break
+        centroid = embeddings[i]
+        sigma = margins[i]
+        f = gaussian_kernel(centroid, sigma)
+        pValues = f(embeddings)
+        cluster_index = pValues > 0.5
+        pred_labels[cluster_index] = c
+        c += 1
+        seediness_copy[cluster_index] = 0
+        check_completion += sum(cluster_index)
+    if cluster_all:
+        pred_labels = cluster_remainder(embeddings, pred_labels)
+    return pred_labels
 
 
 def main_loop(train_cfg, **kwargs):
@@ -159,14 +149,18 @@ def main_loop(train_cfg, **kwargs):
     output = []
 
     iterations = inference_cfg['trainval']['iterations']
+    threshold = kwargs['threshold']
 
     for i in range(iterations):
 
         print("Iteration: %d" % i)
 
         data_blob, res = Trainer.forward(dataset)
+        print(res)
         # segmentation = res['segmentation'][0]
-        embedding = res['cluster_feature'][0]
+        embedding = res['embeddings'][0]
+        seediness = res['seediness'][0]
+        margins = res['margins'][0]
         semantic_labels = data_blob['segment_label'][0][:, -1]
         cluster_labels = data_blob['cluster_label'][0][:, -1]
         coords = data_blob['input_data'][0][:, :3]
@@ -179,27 +173,29 @@ def main_loop(train_cfg, **kwargs):
         index = data_blob['index'][0]
 
         acc_dict = {}
-        eps, min_samples = kwargs['eps'], kwargs['min_samples']
-        clusterer = DBSCAN(eps=eps, min_samples=min_samples)
 
         for c in (np.unique(semantic_labels)):
             semantic_mask = semantic_labels == c
             clabels = cluster_labels[semantic_mask]
             embedding_class = embedding[semantic_mask]
             coords_class = coords[semantic_mask]
+            seed_class = seediness[semantic_mask]
+            margins_class = margins[semantic_mask]
 
-            pred = clusterer.fit_predict(embedding_class)
+            pred = fit_predict(embedding_class, seed_class, margins_class, 
+                               threshold=threshold, cluster_all=True)
 
             purity, efficiency = purity_efficiency(pred, clabels)
             fscore = 2 * (purity * efficiency) / (purity + efficiency)
             ari = ARI(pred, clabels)
             nclusters = len(np.unique(clabels))
 
-            row = (index, c, ari, purity, efficiency, fscore, nclusters, eps, min_samples)
+            row = (index, c, ari, purity, efficiency, fscore, nclusters, t)
+            print(row)
             output.append(row)
 
     output = pd.DataFrame(output, columns=['Index', 'Class', 'ARI',
-                'Purity', 'Efficiency', 'FScore', 'num_clusters', 'eps', 'min_samples'])
+                'Purity', 'Efficiency', 'FScore', 'num_clusters', 'threshold'])
     return output
 
 
@@ -211,19 +207,18 @@ if __name__ == "__main__":
     parser.add_argument('-n', '--name', help='name of output', type=str)
     parser.add_argument('-i', '--num_events', type=int)
     parser.add_argument('-gpu', '--gpu', type=str)
-    #parser.add_argument('-ckpt', '--checkpoint_number', type=int)
 
     args = parser.parse_args()
     args = vars(args)
 
     train_cfg = args['config_path']
-    searchAlgorithm = BinarySearchDBSCAN()
-    start = time.time()
-    res = searchAlgorithm.optimize(train_cfg, 
-        args['gpu'], args['num_events'])
-    end = time.time()
-    print("Time = {}".format(end - start))
-    name = '{}_eps{}_ms{}.csv'.format(args['name'],
-        searchAlgorithm.eps, searchAlgorithm.min_samples)
-    target = os.path.join(args['target'], name)
-    res.to_csv(target, index=False)
+    thresholds = np.linspace(0.5, 1.0, 20)
+    for t in thresholds:
+        start = time.time()
+        output = main_loop(train_cfg, threshold=t, iterations=args['num_events'],
+                           gpu=args['gpu'])
+        end = time.time()
+        print("Time = {}".format(end - start))
+        name = '{}_{}.csv'.format(args['name'], t)
+        target = os.path.join(args['target'], name)
+        output.to_csv(target, index=False)

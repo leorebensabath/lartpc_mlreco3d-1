@@ -336,7 +336,7 @@ class AdaptIS(NetworkBase):
             localCoords = coords[:, :3].detach().cpu().numpy()
             localPoints = points[:, :3].detach().cpu().numpy()
             tree = cKDTree(localPoints)
-            dists, indices = tree.query(localCoords, k=1,
+            dists, indices = tree.query(features, k=1,
                              distance_upper_bound=self.spatial_size)
             perm = np.argsort(dists)
             _, indices = np.unique(indices[perm], return_index=True)

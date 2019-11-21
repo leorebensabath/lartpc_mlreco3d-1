@@ -48,7 +48,7 @@ class ClusterCNN(NetworkBase):
 
         self.backbone_config = self.model_config.get('backbone', None)
         self.clustering_config = self.model_config.get('clustering', None)
-        self.proximity_config = self.model_config.get('proximity', None)
+        self.compute_distance_estimate = self.clustering_config.get('compute_distance_estimate', False)
 
         # Construct Backbone
         backbone_name = self.backbone_config.get('name', 'uresnet')
@@ -58,28 +58,34 @@ class ClusterCNN(NetworkBase):
 
         # Add N-Convolutions for Clustering
         if self.clustering_config is not None:
-            clusternet = cluster_model_construct(
-                self.clustering_config.get('name', 'multi'))
+            self.clustering_name = self.clustering_config.get('name', 'multi_distance')
+            clusternet = cluster_model_construct(self.clustering_name)
             self.net = clusternet(cfg, self.net, name='embeddings')
+
+        # For final embeddings:
+        self.final_embeddings = scn.Sequential()
+        self.embedding_dim = self.clustering_config.get('embedding_dim', 8)
+        self._resnet_block(self.final_embeddings, 2 * self.num_filters, self.embedding_dim)
         
         # Add Distance Estimation Layer
-        if self.proximity_config is not None:
-            self.dist_N = self.proximity_config.get('dist_N', 3)
-            self.dist_simple_conv = self.proximity_config.get('dist_simple_conv', False)
+        if self.compute_distance_estimate:
+            self.dist_N = self.clustering_config.get('dist_N', 3)
+            self.dist_simple_conv = self.clustering_config.get('dist_simple_conv', False)
             self.distance_estimate = scn.Sequential()
-            self.compute_distance_estimate = self.proximity_config.get('compute_distance_estimate', False)
             if self.dist_simple_conv:
                 distanceBlock = self._block
             else:
                 distanceBlock = self._resnet_block
             for i in range(self.dist_N):
+                num_input = self.num_filters
+                num_output = self.num_filters
+                if i == 0:
+                    num_input = 2 * self.num_filters
                 if i == self.dist_N-1:
                     num_output = 2
-                else:
-                    num_output = self.num_filters
-                distanceBlock(self.distance_estimate, self.num_filters, num_output)
+                distanceBlock(self.distance_estimate, num_input, num_output)
 
-        print(self)
+        self.concat = scn.JoinTable()
 
 
     def forward(self, input):
@@ -87,9 +93,21 @@ class ClusterCNN(NetworkBase):
         Forward function for whole ClusterNet Chain.
         '''
         result = self.net(input)
-        embedding = result['cluster_feature'][0][0]
+        # for key, val in result.items():
+        #     if isinstance(val[0], list):
+        #         l = [str(t.features.shape) for t in val[0]]
+        #         s = ' '.join(l)
+        #         print('{} = {}'.format(key, s))
+        #     else:
+        #         print("{} = {}".format(key, val[0].features.shape))
+        final_cluster_features = result['cluster_feature'][0][0]
+        final_decoder_features = result['features_dec'][0][-1]
+
+        x = self.concat([final_decoder_features, final_cluster_features])
+        x_emb = self.final_embeddings(x)
+        result['cluster_feature'][0][0] = x_emb
         if self.compute_distance_estimate:
-            result['distance_estimation'] = [self.distance_estimate(embedding)]
+            result['distance_estimation'] = [self.distance_estimate(x)]
         return result
 
 
@@ -125,6 +143,13 @@ class ClusteringLoss(nn.Module):
         '''
         Forward Function for clustering loss , with distance estimation.
         '''
+        # for key, val in result.items():
+        #     if isinstance(val[0], list):
+        #         l = [str(t.features.shape) for t in val[0]]
+        #         s = ' '.join(l)
+        #         print('{} = {}'.format(key, s))
+        #     else:
+        #         print("{} = {}".format(key, val[0].features.shape))
         res = self.loss_func(result, segment_label, cluster_label)
         return res
 

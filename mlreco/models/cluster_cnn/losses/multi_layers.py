@@ -443,7 +443,7 @@ class WeightedMultiLoss(MultiScaleLoss):
         return res
 
 
-class DistanceEstimationLoss(MultiScaleLoss):
+class DistanceEstimationLoss(MultiScaleLoss2):
 
 
     def __init__(self, cfg, name='clustering_loss'):
@@ -452,6 +452,7 @@ class DistanceEstimationLoss(MultiScaleLoss):
         self.huber_loss = torch.nn.SmoothL1Loss(reduction='mean')
         self.distance_estimate_weight = self.loss_config.get('distance_estimate_weight', 1.0)
         self.clustering_weight = self.loss_config.get('clustering_weight', 1.0)
+
 
     def get_nn_map(self, embedding_class, cluster_class):
         """

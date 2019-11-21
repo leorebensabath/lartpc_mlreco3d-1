@@ -205,7 +205,7 @@ class SpatialEmbeddings2(StackUNet):
         res = {
             "embeddings": [embeddings[:, :self.dimension]],
             "margins": [self.sigmoid(embeddings[:, self.dimension:])],
-            "seediness": [seediness]
+            "seediness": [self.sigmoid(seediness)]
         }
 
         return res

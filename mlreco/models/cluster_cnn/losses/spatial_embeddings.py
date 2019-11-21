@@ -282,11 +282,6 @@ class MaskLovaszHingeLoss(MaskBCELoss2):
             p = torch.exp(-dists / (2 * torch.pow(sigma, 2)))
             probs[index] = p[index]
             loss += lovasz_hinge_flat(2 * p - 1, mask)
-            if loss != loss:
-                print("p = ", p)
-                print("mask = ", mask)
-                print("loss = ", loss)
-                print("embeddings = ", embeddings)
             sigma_detach = sigma.detach()
             smoothing_loss += torch.sum(torch.pow(margins[index] - sigma_detach, 2))
 

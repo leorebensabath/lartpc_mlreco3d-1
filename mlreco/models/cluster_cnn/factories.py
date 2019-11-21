@@ -1,5 +1,6 @@
-from . import loss
+from . import losses
 from . import embeddings
+
 
 def backbone_dict():
     """
@@ -16,6 +17,7 @@ def backbone_dict():
     
     return models
 
+
 def cluster_model_dict():
     '''
     Returns dictionary of implemented clustering layers.
@@ -28,20 +30,20 @@ def cluster_model_dict():
     }
     return models
 
+
 def clustering_loss_dict():
     '''
     Returns dictionary of various clustering losses with enhancements.
     '''
-    losses = {
-        'single': loss.DiscriminativeLoss,
-        'multi': loss.MultiScaleLoss,
-        'multi-weighted': loss.WeightedMultiLoss,
-        'multi-repel': loss.MultiScaleLoss2,
-        # NOTE: Not Yet Working 'multi-both': loss.EnhancedEmbeddingLoss,
-        # NOTE: Not Yet Working 'multi-neighbors': loss.NeighborLoss,
-        'multi-distance': loss.DistanceEstimationLoss
+    loss = {
+        'single': losses.single_layers.DiscriminativeLoss,
+        'multi': losses.multi_layers.MultiScaleLoss,
+        'multi-weighted': losses.multi_layers.WeightedMultiLoss,
+        'multi-repel': losses.multi_layers.MultiScaleLoss2,
+        'multi-distance': losses.multi_layers.DistanceEstimationLoss
     }
-    return losses
+    return loss
+
 
 def backbone_construct(name):
     models = backbone_dict()
@@ -49,11 +51,13 @@ def backbone_construct(name):
         raise Exception("Unknown backbone architecture name provided")
     return models[name]    
 
+
 def cluster_model_construct(name):
     models = cluster_model_dict()
     if not name in models:
         raise Exception("Unknown clustering model name provided")
     return models[name]
+
 
 def clustering_loss_construct(name):
     loss_fns = clustering_loss_dict()
