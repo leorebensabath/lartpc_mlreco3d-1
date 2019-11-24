@@ -11,10 +11,10 @@ class UResNet(torch.nn.Module):
     '''
     UResNet Backbone architecture. Nothing has changed from uresnet.py
     '''
-    def __init__(self, cfg):
+    def __init__(self, cfg, name='discriminative_loss'):
         import sparseconvnet as scn
         super(UResNet, self).__init__()
-        model_config = cfg['modules']['discriminative_loss']
+        model_config = cfg['modules'][name]
         dimension = model_config['data_dim']
         self.spatial_size = model_config['spatial_size']
         reps = model_config.get('reps', 2)  # Conv block repetition factor
@@ -68,9 +68,9 @@ class DiscriminativeLoss(torch.nn.Module):
     we tailor it for use in conjuction with Sparse UResNet.
     '''
 
-    def __init__(self, cfg, reduction='sum'):
+    def __init__(self, cfg, reduction='sum', name='discriminative_loss'):
         super(DiscriminativeLoss, self).__init__()
-        self._cfg = cfg['modules']['discriminative_loss']
+        self._cfg = cfg['modules'][name]
 
     def find_cluster_means(self, features, labels):
         '''

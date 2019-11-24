@@ -55,6 +55,32 @@ class NetworkBase(nn.Module):
                 .add(scn.SubmanifoldConvolution(self.dimension, b, b, 3, self.allow_bias)))
         ).add(scn.AddTable())
 
+
+    def _resnet_block_general(self, norm_layer):
+        '''
+        Utility Method for attaching ResNet-Style Blocks.
+
+        INPUTS:
+            - module (scn Module): network module to attach ResNet block.
+            - a (int): number of input feature dimension
+            - b (int): number of output feature dimension
+            - norm_layer (scn Module constructor): normlization layer to use. 
+
+        RETURNS:
+            None (operation is in-place)
+        '''
+        def f(m, a, b):
+            m.add(scn.ConcatTable()
+                .add(scn.Identity() if a == b else scn.NetworkInNetwork(a, b, self.allow_bias))
+                .add(scn.Sequential()
+                    .add(norm_layer(a, leakiness=self.leakiness))
+                    .add(scn.SubmanifoldConvolution(self.dimension, a, b, 3, self.allow_bias))
+                    .add(norm_layer(b, leakiness=self.leakiness))
+                    .add(scn.SubmanifoldConvolution(self.dimension, b, b, 3, self.allow_bias)))
+            ).add(scn.AddTable())
+            return m
+        return f
+
     
     def _block(self, module, a, b):
         '''

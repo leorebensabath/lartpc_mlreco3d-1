@@ -52,7 +52,7 @@ class _Normalization(nn.Module):
             init.zeros_(self.bias)
 
 
-class SparseInstanceNorm(_Normalization):
+class InstanceNormLeakyReLU(_Normalization):
     '''
     Instance Normalization Layer for Sparse Tensors.
 
@@ -68,23 +68,25 @@ class SparseInstanceNorm(_Normalization):
     RETURNS:
         - out (scn.SparseConvnetTensor)
     '''
-    def __init__(self, *args, **kwargs):
-        super(SparseInstanceNorm, self).__init__(*args, **kwargs)
+    def __init__(self, *args, leakiness=0.0, **kwargs):
+        super(InstanceNormLeakyReLU, self).__init__(*args, **kwargs)
+        self.reset_parameters()
+        self.leak = leakiness
 
     def forward(self, x):
-        out = scn.InputBatch(self.dimension, x.spatial_size)
-        coords = x.get_spatial_locations()
-        out.set_locations(coords, torch.Tensor(coords.shape))
+        out = scn.SparseConvNetTensor()
+        out.metadata = x.metadata
+        out.spatial_size = x.spatial_size
         f = x.features
         f_norm = (f - torch.mean(f, dim=0)) / torch.sqrt(
             (torch.var(f, dim=0) + self.eps))
         if self.affine:
             f_norm = self.weight * f_norm + self.bias
-        out.features = f_norm
+        out.features = F.leaky_relu(f_norm, self.leak)
         return out
 
 
-class SparseGroupNorm(_Normalization):
+class GroupNormLeakyReLU(_Normalization):
     '''
     Group Normalization layer for Sparse Tensors.
 
@@ -99,16 +101,18 @@ class SparseGroupNorm(_Normalization):
     RETURNS:
         - out (scn.SparseConvnetTensor)
     '''
-    def __init__(self, nGroups, *args, **kwargs):
-        super(SparseGroupNorm, self).__init__(*args, **kwargs)
+    def __init__(self, *args, nGroups=2, leakiness=0.0, **kwargs):
+        super(GroupNormLeakyReLU, self).__init__(*args, **kwargs)
+        self.reset_parameters()
         assert (self.num_features % nGroups == 0)
         self.nGroups = nGroups
         self.f_per_group = self.num_features // nGroups
+        self.leak = leakiness
 
     def forward(self, x):
-        out = scn.InputBatch(self.dimension, x.spatial_size)
-        coords = x.get_spatial_locations()
-        out.set_locations(coords, torch.Tensor(coords.shape))
+        out = scn.SparseConvNetTensor()
+        out.metadata = x.metadata
+        out.spatial_size = x.spatial_size
         f = x.features.view(-1, self.nGroups, self.f_per_group)
         mean = f.mean(dim=[0,2], keepdim=True)
         var = f.var(dim=[0,2], keepdim=True)
@@ -116,11 +120,11 @@ class SparseGroupNorm(_Normalization):
         f_norm = f_norm.view(-1, self.num_features)
         if self.affine:
             f_norm = self.weight * f_norm + self.bias
-        out.features = f_norm
+        out.features = F.leaky_relu(f_norm, self.leak)
         return out
 
 
-class SparsePixelNorm(nn.Module):
+class PixelNormLeakyReLU(nn.Module):
     '''
     Pixel Normalization Layer for Sparse Tensors.
     PixelNorm layers were used in NVIDIA's ProGAN.
@@ -131,18 +135,19 @@ class SparsePixelNorm(nn.Module):
     References:
         - NVIDIA ProGAN: https://arxiv.org/pdf/1710.10196.pdf
     '''
-    def __init__(self, num_features, dimension=3, eps=1e-5):
-        super(SparsePixelNorm, self).__init__()
+    def __init__(self, num_features, leakiness=0.0, dimension=3, eps=1e-5):
+        super(PixelNormLeakyReLU, self).__init__()
         self.num_features = num_features
         self.dimension = dimension
         self.eps = eps
+        self.leak = leakiness
 
     def forward(self, x):
-        out = scn.InputBatch(self.dimension, x.spatial_size)
-        coords = x.get_spatial_locations()
-        out.set_locations(coords, torch.Tensor(coords.shape))
+        out = scn.SparseConvNetTensor()
+        out.metadata = x.metadata
+        out.spatial_size = x.spatial_size
         f = x.features
         norm = torch.sum(torch.pow(f, 2), dim=1, keepdim=True)
         f_norm = f / (norm + self.eps).sqrt()
-        out.features = f_norm
+        out.features = F.leaky_relu(f_norm, self.leak)
         return out

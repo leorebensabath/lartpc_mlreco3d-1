@@ -26,6 +26,11 @@ class ClusterCNN(ClusterUNet):
         else:
             raise ValueError('Invalid convolution block mode.')
 
+        self.freeze_embeddings = self.model_config.get('freeze_embeddings', False)
+        if self.freeze_embeddings:
+            for param in self.parameters():
+                param.requires_grad = False
+
         self.distance_conv = scn.Sequential()
         distanceBlock(self.distance_conv, 2 * feature_size, feature_size)
         self.distance_branch = scn.Sequential()

@@ -49,3 +49,21 @@ class ClusteringLoss3(MaskLovaszHingeLoss):
     
     def __init__(self, cfg, name='clustering_loss'):
         super(ClusteringLoss3, self).__init__(cfg)
+
+
+class ClusteringLoss4(MaskLovaszInterLoss):
+
+    def __init__(self, cfg, name='clustering_loss'):
+        super(ClusteringLoss4, self).__init__(cfg)
+
+
+class ClusteringLoss5(MaskLovaszInterLogitsLoss):
+
+    def __init__(self, cfg, name='clustering_loss'):
+        super(ClusteringLoss5, self).__init__(cfg)
+
+
+class ClusteringLoss6(EllipsoidalKernelLoss):
+    
+    def __init__(self, cfg, name='clustering_loss'):
+        super(ClusteringLoss6, self).__init__(cfg)

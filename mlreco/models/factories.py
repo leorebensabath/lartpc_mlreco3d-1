@@ -25,6 +25,7 @@ def model_dict():
     from . import clustercnn_density
 
     from . import clusternet
+    from . import clustercnn_adaptis
 
 
     # Make some models available (not all of them, e.g. PPN is not standalone)
@@ -79,7 +80,15 @@ def model_dict():
         # Spatial Embeddings Ellipse
         "spatial_embeddings_ellipse": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss2),
         # Spatial Embeddings Lovasz
-        "spatial_embeddings_lovasz": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss3)
+        "spatial_embeddings_lovasz": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss3),
+        # Spatial Embeddings Lovasz Inter
+        "spatial_embeddings_lovasz_inter": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss4),
+        # Spatial Embeddings Lovasz Inter Logits
+        "spatial_embeddings_logits": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss5),
+        # Spatial Embeddings Lovasz Inter Logits
+        "spatial_embeddings_lovasz_ellipse": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss6),
+        # AdaptIS
+        "adaptis": (clustercnn_adaptis.ClusterCNN, clustercnn_adaptis.ClusteringLoss)
     }
     # "chain_gnn": (chain_gnn.Chain, chain_gnn.ChainLoss)
     return models

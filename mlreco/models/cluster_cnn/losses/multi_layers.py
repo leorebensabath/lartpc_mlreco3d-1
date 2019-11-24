@@ -558,7 +558,7 @@ class DistanceEstimationLoss(MultiScaleLoss2):
                             acc_avg += acc / n_classes
                             dMap = self.get_nn_map(embedding_class, cluster_class)
                             dloss = self.huber_loss(dMap, distances_class) * self.distance_estimate_weight
-                            loss_class['distance_estimation'].append(dloss)
+                            loss_class['loss_distance_estimation'].append(dloss)
                         # Clustering Loss
                         closs = self.combine(embedding_class,
                                              cluster_class,
@@ -577,11 +577,13 @@ class DistanceEstimationLoss(MultiScaleLoss2):
 
         for key, val in loss.items():
             res[key] = sum(val) / len(val)
-        res['loss'] += res['distance_estimation']
-        res['distance_estimation'] = float(res['distance_estimation'])
+        res['loss'] += res['loss_distance_estimation']
+        res['loss_distance_estimation'] = float(res['loss_distance_estimation'])
 
         for key, val in accuracy.items():
             res[key] = sum(val) / len(val)
+
+        print(res)
 
         return res
 

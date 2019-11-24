@@ -67,6 +67,12 @@ class ClusterCNN(NetworkBase):
         self.embedding_dim = self.clustering_config.get('embedding_dim', 8)
         self._resnet_block(self.final_embeddings, 2 * self.num_filters, self.embedding_dim)
         
+        self.freeze_embeddings = self.clustering_config.get('freeze_embeddings', False)
+        if self.freeze_embeddings:
+            print("Embedding Generator Network Freezed.")
+            for param in self.parameters():
+                param.requires_grad = False
+
         # Add Distance Estimation Layer
         if self.compute_distance_estimate:
             self.dist_N = self.clustering_config.get('dist_N', 3)
