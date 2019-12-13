@@ -76,19 +76,23 @@ def model_dict():
         # Spatial Embeddings
         "spatial_embeddings": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss1),
         # Spatial Embeddings Stack
-        "spatial_embeddings_stack": (clustercnn_se.ClusterCNN2, clustercnn_se.ClusteringLoss1),
+        "spatial_embeddings_stack": (clustercnn_se.ClusterCNN2, clustercnn_se.ClusteringLoss4),
         # Spatial Embeddings Ellipse
         "spatial_embeddings_ellipse": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss2),
         # Spatial Embeddings Lovasz
         "spatial_embeddings_lovasz": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss3),
         # Spatial Embeddings Lovasz Inter
         "spatial_embeddings_lovasz_inter": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss4),
-        # Spatial Embeddings Lovasz Inter Logits
-        "spatial_embeddings_logits": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss5),
-        # Spatial Embeddings Lovasz Inter Logits
+        # Spatial Embeddings Lovasz Inter Ellipse
         "spatial_embeddings_lovasz_ellipse": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss6),
         # AdaptIS
-        "adaptis": (clustercnn_adaptis.ClusterCNN, clustercnn_adaptis.ClusteringLoss)
+        "adaptis": (clustercnn_adaptis.ClusterCNN, clustercnn_adaptis.ClusteringLoss),
+        # Spatial Embeddings Lovasz free
+        "spatial_embeddings_lovasz_free": (clustercnn_se.ClusterCNN3, clustercnn_se.ClusteringLoss4),
+        # Spatial Embeddings Focal
+        "spatial_embeddings_focal": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss7),
+        # Spatial Embeddings Weighted Focal
+        "spatial_embeddings_weighted_focal": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss8)
     }
     # "chain_gnn": (chain_gnn.Chain, chain_gnn.ChainLoss)
     return models

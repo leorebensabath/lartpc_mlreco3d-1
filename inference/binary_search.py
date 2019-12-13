@@ -151,10 +151,18 @@ def main_loop(train_cfg, **kwargs):
     dataset = iter(cycle(loader))
     Trainer = trainval(inference_cfg)
     loaded_iteration = Trainer.initialize()
+    start_index = kwargs.get('start_index', 0)
 
     output = []
 
     iterations = inference_cfg['trainval']['iterations']
+    if start_index:
+        for j in range(iterations):
+            a, b = Trainer.forward(dataset)
+            if j % 50 == 0:
+                print("Skipping Events: {}".format(j))
+        del a
+        del b
 
     for i in range(iterations):
 

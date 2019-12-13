@@ -6,7 +6,9 @@ import numpy as np
 import sparseconvnet as scn
 
 from .lovasz import mean, lovasz_hinge_flat, StableBCELoss
+from .misc import FocalLoss, WeightedFocalLoss
 from collections import defaultdict
+
 
 class MaskBCELoss(nn.Module):
     '''
@@ -20,6 +22,17 @@ class MaskBCELoss(nn.Module):
         self.embedding_weight = self.loss_config.get('embedding_weight', 10.0)
         self.smoothing_weight = self.loss_config.get('smoothing_weight', 1.0)
         self.spatial_size = self.loss_config.get('spatial_size', 512)
+        self.loss_scheme = self.loss_config.get('loss_scheme', 'BCE')
+
+        if self.loss_scheme == 'BCE':
+            self.mask_loss = StableBCELoss()
+        elif self.loss_scheme == 'lovasz_hinge':
+            self.mask_loss = lovasz_hinge_flat
+        elif self.loss_scheme == 'focal':
+            raise NotImplementedError
+        else:
+            raise ValueError(
+            'Invalid loss scheme: {}'.format(self.loss_scheme))
         
         # BCELoss for Embedding Loss
         self.bceloss = StableBCELoss()
@@ -299,6 +312,23 @@ class MaskLovaszInterLoss(MaskLovaszHingeLoss):
         self.inter_weight = self.loss_config.get('inter_weight', 1.0)
         self.norm = 2
 
+
+    def regularization(self, cluster_means):
+        '''
+        Implementation of regularization loss in Discriminative Loss
+        Inputs:
+            cluster_means (torch.Tensor): output from find_cluster_means
+        Returns:
+            reg_loss (float): computed regularization loss (see paper).
+        '''
+        reg_loss = 0.0
+        n_clusters, _ = cluster_means.shape
+        for i in range(n_clusters):
+            reg_loss += torch.norm(cluster_means[i, :] + 1e-8, p=self.norm)
+        reg_loss /= float(n_clusters)
+        return reg_loss
+
+
     def inter_cluster_loss(self, cluster_means, margin=0.2):
         '''
         Implementation of distance loss in Discriminative Loss.
@@ -327,6 +357,7 @@ class MaskLovaszInterLoss(MaskLovaszHingeLoss):
             inter_loss /= float((n_clusters - 1) * n_clusters)
             return inter_loss
 
+
     def get_per_class_probabilities(self, embeddings, margins, labels, coords):
         '''
         Computes binary foreground/background loss.
@@ -335,6 +366,7 @@ class MaskLovaszInterLoss(MaskLovaszHingeLoss):
         smoothing_loss = 0.0
         centroids = self.find_cluster_means(embeddings, labels)
         inter_loss = self.inter_cluster_loss(centroids)
+        reg_loss = self.regularization(centroids)
         n_clusters = len(centroids)
         cluster_labels = labels.unique(sorted=True)
         probs = torch.zeros(embeddings.shape[0]).float().cuda()
@@ -357,6 +389,7 @@ class MaskLovaszInterLoss(MaskLovaszHingeLoss):
         smoothing_loss /= n_clusters
         acc /= n_clusters
         loss += inter_loss
+        loss += reg_loss / n_clusters
 
         return loss, smoothing_loss, inter_loss, probs, acc
 
@@ -410,47 +443,6 @@ class MaskLovaszInterLoss(MaskLovaszHingeLoss):
         return loss, accuracy
 
 
-class MaskLovaszInterLogitsLoss(MaskLovaszInterLoss):
-
-    def __init__(self, cfg, name='clustering_loss'):
-        super(MaskLovaszInterLogitsLoss, self).__init__(cfg)
-
-    def get_per_class_probabilities(self, embeddings, margins, labels, coords):
-        '''
-        Computes binary foreground/background loss.
-        '''
-        loss = 0.0
-        smoothing_loss = 0.0
-        centroids = self.find_cluster_means(embeddings, labels)
-        inter_loss = self.inter_cluster_loss(centroids)
-        n_clusters = len(centroids)
-        cluster_labels = labels.unique(sorted=True)
-        probs = torch.zeros(embeddings.shape[0]).float().cuda()
-        acc = 0.0
-
-        for i, c in enumerate(cluster_labels):
-            index = (labels == c)
-            mask = torch.zeros(embeddings.shape[0]).cuda()
-            mask[index] = 1
-            mask[~index] = 0
-            sigma = torch.mean(margins[index], dim=0)
-            dists = torch.sum(torch.pow(embeddings - centroids[i], 2), dim=1)
-            logits = -dists / (2 * torch.pow(sigma, 2))
-            p = torch.exp(logits)
-            probs[index] = p[index]
-            logits = (1.0 - 2.0 * mask) * logits
-            loss += lovasz_hinge_flat(logits, mask)
-            sigma_detach = sigma.detach()
-            smoothing_loss += torch.sum(torch.pow(margins[index] - sigma_detach, 2))
-
-        loss /= n_clusters
-        smoothing_loss /= n_clusters
-        acc /= n_clusters
-        loss += inter_loss
-
-        return loss, smoothing_loss, inter_loss, probs, acc
-
-
 class EllipsoidalKernelLoss(MaskLovaszInterLoss):
 
     def __init__(self, cfg, name='clustering_loss'):
@@ -490,3 +482,51 @@ class EllipsoidalKernelLoss(MaskLovaszInterLoss):
         loss += inter_loss
 
         return loss, smoothing_loss, inter_loss, probs, acc
+
+
+class MaskFocalLoss(MaskBCELoss2):
+    '''
+    Spatial Embeddings Loss with trainable center of attention.
+    '''
+    def __init__(self, cfg, name='clustering_loss'):
+        super(MaskFocalLoss, self).__init__(cfg)
+        self.bceloss = FocalLoss(logits=False)
+
+    def get_per_class_probabilities(self, embeddings, margins, labels, coords):
+        '''
+        Computes binary foreground/background loss.
+        '''
+        loss = 0.0
+        smoothing_loss = 0.0
+        centroids = self.find_cluster_means(embeddings, labels)
+        n_clusters = len(centroids)
+        cluster_labels = labels.unique(sorted=True)
+        probs = torch.zeros(embeddings.shape[0]).float().cuda()
+        acc = 0.0
+
+        for i, c in enumerate(cluster_labels):
+            index = (labels == c)
+            mask = torch.zeros(embeddings.shape[0]).cuda()
+            mask[index] = 1.0
+            mask[~index] = 0.0
+            sigma = torch.mean(margins[index], dim=0)
+            dists = torch.sum(torch.pow(embeddings - centroids[i], 2), dim=1)
+            logits = dists / (2 * torch.pow(sigma, 2))
+            p = torch.clamp(torch.exp(-dists / (2 * torch.pow(sigma, 2))), min=0, max=1)
+            probs[index] = p[index]
+            loss += self.bceloss(p, mask)
+            sigma_detach = sigma.detach()
+            smoothing_loss += torch.sum(torch.pow(margins[index] - sigma_detach, 2))
+
+        loss /= n_clusters
+        smoothing_loss /= n_clusters
+        acc /= n_clusters
+
+        return loss, smoothing_loss, probs, acc
+
+
+class MaskWeightedFocalLoss(MaskFocalLoss):
+
+    def __init__(self, cfg, name='clustering_loss'):
+        super(MaskWeightedFocalLoss, self).__init__(cfg)
+        self.bceloss = WeightedFocalLoss(logits=False)

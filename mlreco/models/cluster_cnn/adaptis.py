@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import sparseconvnet as scn
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 
 # Pytorch Implementation of AdaptIS
 # Original Paper: https://arxiv.org/pdf/1909.07829.pdf
@@ -17,6 +17,9 @@ from mlreco.models.layers.base import NetworkBase
 from mlreco.models.layers.normalizations import *
 from scipy.spatial import cKDTree
 
+
+Logits = namedtuple('Logits', \
+            ['batch_id', 'class_id', 'group_id', 'scores'])
 
 class AdaIN(nn.Module):
     '''
@@ -401,7 +404,7 @@ class AdaptIS(NetworkBase):
         k = 1
         use_ppn_truth = set([2, 4])
         batch_idx = coords[:, -1].unique()
-        logits = []
+        output = []
         for i, bidx in enumerate(batch_idx):
             batch_logits = []
             batch_mask = coords[:, 3] == bidx
@@ -451,10 +454,11 @@ class AdaptIS(NetworkBase):
                     feature_batch, coords_batch, 
                     prior_coords, weights, biases)
                 mask_logits = list(zip(clabels, mask_logits))
-                batch_logits.append(mask_logits)
-            logits.append(batch_logits)
-
-        return logits
+                for c, scores in mask_logits:
+                    logits = Logits(int(bidx), int(s), int(c), scores)
+                    batch_logits.append(logits)
+            output.append(batch_logits)
+        return output
 
 
     def test_loop(self, features, ppn_scores):
@@ -485,7 +489,6 @@ class AdaptIS(NetworkBase):
         '''
         cluster_label, input_data, segment_label, particle_label = input
         coords = input_data[:, :4]
-        TRACK_LABELS = set([0,1])
         net_output = self.net([input_data])
         # Get last feature layer in UResNet
         features = net_output['features_dec'][0][-1]
@@ -493,13 +496,9 @@ class AdaptIS(NetworkBase):
         # Point Proposal map and Segmentation Map is Holistic. 
         ppn_scores = self.attention_net(features)
         ppn_scores = self.attentionOut(ppn_scores)
-        print("PPN = {}, {}".format(ppn_scores, ppn_scores.shape))
         segmentation_scores = self.segmentation_net(features)
         segmentation_scores = self.segmentationOut(segmentation_scores)
-        print("Segmentation = {}, {}".format(
-            segmentation_scores, segmentation_scores.shape))
         features = self.featureOutput(features)
-        print("Features = {}, {}".format(features, features.shape))
 
         # For Instance Branch, mask generation is instance-by-instance.
         if self.instance_branch.training_mode:

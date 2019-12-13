@@ -6,6 +6,7 @@ from collections import defaultdict
 
 from mlreco.models.layers.uresnet import UResNet
 from mlreco.models.layers.stacknet import StackUNet
+from .utils import add_normalized_coordinates, distance_matrix
 
 class SpatialEmbeddings1(UResNet):
 
@@ -134,6 +135,7 @@ class SpatialEmbeddings2(StackUNet):
         self.outputEmbeddings.add(scn.OutputLayer(self.dimension))
         self.outputSeediness = scn.Sequential()
         self._nin_block(self.outputSeediness, self.num_filters, self.seedDim)
+        self.outputSeediness.add(scn.Sigmoid())
         self.outputSeediness.add(scn.OutputLayer(self.dimension))
 
         # Pytorch Activations
@@ -205,7 +207,69 @@ class SpatialEmbeddings2(StackUNet):
         res = {
             "embeddings": [embeddings[:, :self.dimension]],
             "margins": [self.sigmoid(embeddings[:, self.dimension:])],
+            "seediness": [seediness]
+        }
+
+        return res
+
+
+class SpatialEmbeddings3(SpatialEmbeddings1):
+
+
+    def __init__(self, cfg, name='spatial_embeddings'):
+        super(SpatialEmbeddings3, self).__init__(cfg, name=name)
+        self.embedding_dim = self.model_config.get('embedding_dim', 4)
+        self.coordConv = self.model_config.get('coordConv', True)
+        # Define outputlayers
+        self.outputEmbeddings = scn.Sequential()
+        self._resnet_block(self.outputEmbeddings, self.num_filters, self.embedding_dim)
+        self.outputEmbeddings.add(scn.OutputLayer(self.dimension))
+        # Seediness Output
+        self.outputSeediness = scn.Sequential()
+        self._resnet_block(self.outputSeediness, self.num_filters, self.seedDim)
+        self.outputSeediness.add(scn.OutputLayer(self.dimension))
+        # Margin Output
+        self.outputMargins = scn.Sequential()
+        self._resnet_block(self.outputMargins, self.num_filters, self.sigmaDim)
+        self.outputMargins.add(scn.OutputLayer(self.dimension))
+
+
+    def forward(self, input):
+        '''
+        point_cloud is a list of length minibatch size (assumes mbs = 1)
+        point_cloud[0] has 3 spatial coordinates + 1 batch coordinate + 1 feature
+        label has shape (point_cloud.shape[0] + 5*num_labels, 1)
+        label contains segmentation labels for each point + coords of gt points
+
+        RETURNS:
+            - feature_enc: encoder features at each spatial resolution.
+            - feature_dec: decoder features at each spatial resolution.
+        '''
+        point_cloud, = input
+        coords = point_cloud[:, 0:self.dimension+1].float()
+        normalized_coords = (coords[:, :3] - float(self.spatial_size) / 2) \
+                    / (float(self.spatial_size) / 2)
+        features = point_cloud[:, self.dimension+1:].float()
+        if self.coordConv:
+            features = torch.cat([normalized_coords, features], dim=1)
+
+        x = self.input((coords, features))
+        encoder_res = self.encoder(x)
+        features_enc = encoder_res['features_enc']
+        deepest_layer = encoder_res['deepest_layer']
+        features_cluster = self.decoder(features_enc, deepest_layer)
+        features_seediness = self.seed_decoder(features_enc, deepest_layer)
+
+        embeddings = self.outputEmbeddings(features_cluster[-1])
+        margins = self.outputMargins(features_cluster[-1])
+        seediness = self.outputSeediness(features_seediness[-1])
+
+        res = {
+            "embeddings": [self.tanh(embeddings)],
+            "margins": [self.sigmoid(margins)],
             "seediness": [self.sigmoid(seediness)]
         }
 
+        print(res)
+        
         return res

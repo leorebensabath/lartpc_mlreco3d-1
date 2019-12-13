@@ -131,11 +131,14 @@ def flatten_binary_scores(scores, labels, ignore=None):
 
 class StableBCELoss(torch.nn.modules.Module):
     def __init__(self):
-         super(StableBCELoss, self).__init__()
-    def forward(self, input, target):
-         neg_abs = - input.abs()
-         loss = input.clamp(min=0) - input * target + (1 + neg_abs.exp()).log()
-         return loss.mean()
+        super(StableBCELoss, self).__init__()
+    def forward(self, input, target, reduction='mean'):
+        neg_abs = - input.abs()
+        loss = input.clamp(min=0) - input * target + (1 + neg_abs.exp()).log()
+        if reduction == 'mean':
+            return loss.mean()
+        else:
+            return loss
 
 
 def binary_xloss(logits, labels, ignore=None):

@@ -11,6 +11,7 @@ from mlreco.utils.data_parallel import DataParallel
 import numpy as np
 from mlreco.utils.utils import to_numpy
 import re
+from mlreco.models.cluster_cnn.adaptis import Logits
 
 class trainval(object):
     """
@@ -283,6 +284,8 @@ class trainval(object):
                 if len(output_keys) and not key in output_keys: continue
                 if len(result[key]) == 0:
                     continue
+                # if isinstance(result[key][0][0][0], Logits):
+                #     continue
                 if isinstance(result[key][0], list):
                     res[key] = [[to_numpy(s) for s in x] for x in result[key]]
                 else:

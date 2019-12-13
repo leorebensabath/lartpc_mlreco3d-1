@@ -3,7 +3,7 @@ import torch.nn as nn
 import numpy as np
 import sparseconvnet as scn
 
-from .cluster_cnn.spatial_embeddings import SpatialEmbeddings1, SpatialEmbeddings2
+from .cluster_cnn.spatial_embeddings import SpatialEmbeddings1, SpatialEmbeddings2, SpatialEmbeddings3
 from .cluster_cnn.losses.spatial_embeddings import *
 
 
@@ -33,6 +33,12 @@ class ClusterCNN2(SpatialEmbeddings2):
         super(ClusterCNN2, self).__init__(cfg)
 
 
+class ClusterCNN3(SpatialEmbeddings3):
+
+    def __init__(self, cfg):
+        super(ClusterCNN3, self).__init__(cfg)
+
+
 class ClusteringLoss1(MaskBCELoss2):
 
     def __init__(self, cfg, name='clustering_loss'):
@@ -57,13 +63,17 @@ class ClusteringLoss4(MaskLovaszInterLoss):
         super(ClusteringLoss4, self).__init__(cfg)
 
 
-class ClusteringLoss5(MaskLovaszInterLogitsLoss):
-
-    def __init__(self, cfg, name='clustering_loss'):
-        super(ClusteringLoss5, self).__init__(cfg)
-
-
 class ClusteringLoss6(EllipsoidalKernelLoss):
     
     def __init__(self, cfg, name='clustering_loss'):
         super(ClusteringLoss6, self).__init__(cfg)
+
+class ClusteringLoss7(MaskFocalLoss):
+
+    def __init__(self, cfg, name='clustering_loss'):
+        super(ClusteringLoss7, self).__init__(cfg)
+
+class ClusteringLoss8(MaskWeightedFocalLoss):
+
+    def __init__(self, cfg, name='clustering_loss'):
+        super(ClusteringLoss8, self).__init__(cfg)

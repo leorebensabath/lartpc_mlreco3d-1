@@ -583,7 +583,7 @@ class DistanceEstimationLoss(MultiScaleLoss2):
         for key, val in accuracy.items():
             res[key] = sum(val) / len(val)
 
-        print(res)
+        #print(res)
 
         return res
 

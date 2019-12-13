@@ -5,7 +5,7 @@ import sparseconvnet as scn
 from collections import defaultdict
 
 from mlreco.models.layers.base import NetworkBase
-from .utils import add_normalized_coordinates
+from .utils import add_normalized_coordinates, distance_matrix
 
 
 class ClusterEmbeddings(NetworkBase):
@@ -371,5 +371,91 @@ class StackedEmbeddings(ClusterEmbeddings):
             'features_dec': [features_dec],
             'cluster_feature': [cluster_feature[::-1]]
         }
+
+        return res
+
+
+class GCNNEmbeddings(ClusterEmbeddings):
+
+    def __init__(self, cfg, name='gcnn_embeddings'):
+        super(GCNNEmbeddings, self).__init__(self, cfg, name=name)
+        self.k = self.model_config.get('num_neighbors', 10)
+        self.gcnn_layers = self.model_config.get('gcnn_layers', 2)
+        
+    def get_nn_map(self, embedding_class, cluster_class):
+        """
+        Computes voxel team loss.
+
+        INPUTS:
+            (torch.Tensor)
+            - embedding_class: class-masked hyperspace embedding
+            - cluster_class: class-masked cluster labels
+
+        RETURNS:
+            - loss (torch.Tensor): scalar tensor representing aggregated loss.
+            - dlossF (dict of floats): dictionary of ally loss.
+            - dlossE (dict of floats): dictionary of enemy loss.
+            - dloss_map (torch.Tensor): computed ally/enemy affinity for each voxel. 
+        """
+        with torch.no_grad():
+            knnFeatures = torch.zeros(embedding_class.shape[0], 
+                                      self.k, embedding_class.shape[1])
+            allyMap = torch.zeros(embedding_class.shape[0])
+            enemyMap = torch.zeros(embedding_class.shape[0])
+            if torch.cuda.is_available():
+                allyMap = allyMap.cuda()
+                enemyMap = enemyMap.cuda() 
+            dist = distance_matrix(embedding_class)
+            cluster_ids = cluster_class.unique().int()
+            num_clusters = float(cluster_ids.shape[0])
+            for c in cluster_ids:
+                index = cluster_class.int() == c
+                allies = dist[index, :][:, index]
+                num_allies = allies.shape[0]
+                if num_allies <= 1:
+                    # Skip if only one point
+                    continue
+                ind = np.diag_indices(num_allies)
+                allies[ind[0], ind[1]] = float('inf')
+                allies, _ = torch.min(allies, dim=1)
+                allyMap[index] = allies
+                if index.all(): 
+                    # Skip if there are no enemies
+                    continue
+                enemies, _ = torch.min(dist[index, :][:, ~index], dim=1)
+                enemyMap[index] = enemies
+
+            nnMap = torch.cat([allyMap.view(-1, 1), enemyMap.view(-1, 1)], dim=1)
+            topk = min(self.k+1, embedding_class.shape[0])
+            _, index = dist.topk(topk, largest=False)
+            nnFeatures = embedding_class[index][:, 1:, :]
+            knnFeatures[:, :topk] = nnFeatures
+
+            return nnMap, knnFeatures
+
+    def forward(self, input):
+        '''
+        point_cloud is a list of length minibatch size (assumes mbs = 1)
+        point_cloud[0] has 3 spatial coordinates + 1 batch coordinate + 1 feature
+        label has shape (point_cloud.shape[0] + 5*num_labels, 1)
+        label contains segmentation labels for each point + coords of gt points
+
+        RETURNS:
+            - feature_dec: decoder features at each spatial resolution.
+            - cluster_feature: clustering features at each spatial resolution.
+        '''
+        point_cloud, = input
+        coords = point_cloud[:, 0:self.dimension+1].float()
+        features = point_cloud[:, self.dimension+1:].float()
+        res = {}
+
+        x = self.net.input((coords, features))
+        encoder_output = self.encoder(x)
+        decoder_output = self.decoder(encoder_output['features_enc'],
+                                encoder_output['deepest_layer'])
+        
+        res['features_dec'] = [decoder_output['features_dec']]
+        # Reverse cluster feature tensor list to agree with label ordering.
+        res['cluster_feature'] = [decoder_output['cluster_feature'][::-1]]
 
         return res
