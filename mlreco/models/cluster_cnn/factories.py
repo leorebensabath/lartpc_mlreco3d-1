@@ -40,7 +40,14 @@ def clustering_loss_dict():
         'multi': losses.multi_layers.MultiScaleLoss,
         'multi-weighted': losses.multi_layers.WeightedMultiLoss,
         'multi-repel': losses.multi_layers.MultiScaleLoss2,
-        'multi-distance': losses.multi_layers.DistanceEstimationLoss
+        'multi-distance': losses.multi_layers.DistanceEstimationLoss,
+        'se_bce': losses.spatial_embeddings.MaskBCELoss2,
+        'se_bce_ellipse': losses.spatial_embeddings.MaskBCELossBivariate,
+        'se_lovasz': losses.spatial_embeddings.MaskLovaszHingeLoss,
+        'se_lovasz_inter': losses.spatial_embeddings.MaskLovaszInterLoss,
+        'se_lovasz_ellipse': losses.spatial_embeddings.EllipsoidalKernelLoss,
+        'se_focal': losses.spatial_embeddings.MaskFocalLoss,
+        'se_weighted_focal': losses.spatial_embeddings.MaskWeightedFocalLoss
     }
     return loss
 

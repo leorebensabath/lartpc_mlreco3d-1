@@ -5,7 +5,7 @@ import sparseconvnet as scn
 
 from .cluster_cnn.spatial_embeddings import SpatialEmbeddings1, SpatialEmbeddings2, SpatialEmbeddings3
 from .cluster_cnn.losses.spatial_embeddings import *
-
+from .cluster_cnn import cluster_model_construct, backbone_construct, clustering_loss_construct
 
 class ClusterCNN(SpatialEmbeddings1):
     '''
@@ -39,41 +39,60 @@ class ClusterCNN3(SpatialEmbeddings3):
         super(ClusterCNN3, self).__init__(cfg)
 
 
-class ClusteringLoss1(MaskBCELoss2):
-
+class ClusteringLoss(nn.Module):
+    '''
+    Loss function for Proposal-Free Mask Generators.
+    '''
     def __init__(self, cfg, name='clustering_loss'):
-        super(ClusteringLoss1, self).__init__(cfg)
+        super(ClusteringLoss, self).__init__()
+
+        if 'modules' in cfg:
+            self.loss_config = cfg['modules'][name]
+        else:
+            self.loss_config = cfg
+
+        self.loss_func_name = self.loss_config.get('name', 'se_lovasz_inter')
+        self.loss_func = clustering_loss_construct(self.loss_func_name)
+        self.loss_func = self.loss_func(cfg)
+
+    def forward(self, result, segment_label, cluster_label):
+        return self.loss_func(result, segment_label, cluster_label)
+
+# class ClusteringLoss1(MaskBCELoss2):
+
+#     def __init__(self, cfg, name='clustering_loss'):
+#         super(ClusteringLoss1, self).__init__(cfg)
 
 
-class ClusteringLoss2(MaskBCELossBivariate):
+# class ClusteringLoss2(MaskBCELossBivariate):
 
-    def __init__(self, cfg, name='clustering_loss'):
-        super(ClusteringLoss2, self).__init__(cfg)
+#     def __init__(self, cfg, name='clustering_loss'):
+#         super(ClusteringLoss2, self).__init__(cfg)
 
 
-class ClusteringLoss3(MaskLovaszHingeLoss):
+# class ClusteringLoss3(MaskLovaszHingeLoss):
     
-    def __init__(self, cfg, name='clustering_loss'):
-        super(ClusteringLoss3, self).__init__(cfg)
+#     def __init__(self, cfg, name='clustering_loss'):
+#         super(ClusteringLoss3, self).__init__(cfg)
 
 
-class ClusteringLoss4(MaskLovaszInterLoss):
+# class ClusteringLoss4(MaskLovaszInterLoss):
 
-    def __init__(self, cfg, name='clustering_loss'):
-        super(ClusteringLoss4, self).__init__(cfg)
+#     def __init__(self, cfg, name='clustering_loss'):
+#         super(ClusteringLoss4, self).__init__(cfg)
 
 
-class ClusteringLoss6(EllipsoidalKernelLoss):
+# class ClusteringLoss6(EllipsoidalKernelLoss):
     
-    def __init__(self, cfg, name='clustering_loss'):
-        super(ClusteringLoss6, self).__init__(cfg)
+#     def __init__(self, cfg, name='clustering_loss'):
+#         super(ClusteringLoss6, self).__init__(cfg)
 
-class ClusteringLoss7(MaskFocalLoss):
+# class ClusteringLoss7(MaskFocalLoss):
 
-    def __init__(self, cfg, name='clustering_loss'):
-        super(ClusteringLoss7, self).__init__(cfg)
+#     def __init__(self, cfg, name='clustering_loss'):
+#         super(ClusteringLoss7, self).__init__(cfg)
 
-class ClusteringLoss8(MaskWeightedFocalLoss):
+# class ClusteringLoss8(MaskWeightedFocalLoss):
 
-    def __init__(self, cfg, name='clustering_loss'):
-        super(ClusteringLoss8, self).__init__(cfg)
+#     def __init__(self, cfg, name='clustering_loss'):
+#         super(ClusteringLoss8, self).__init__(cfg)

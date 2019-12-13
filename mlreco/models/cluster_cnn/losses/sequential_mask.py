@@ -16,12 +16,6 @@ def compute_iou(pred, labels, smoothing=1e-6):
         iou = (intersection + smoothing) / (union + smoothing)
         return iou
 
-def focal_loss(probs, labels, gamma=1.0):
-    pass
-
-def weighed_bce_with_logits(pred, labels, weight=None):
-    pass
-
 
 # Sequential Mask Loss
 class SequentialMaskLoss(nn.Module):

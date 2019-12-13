@@ -4,7 +4,7 @@ import numpy as np
 import sparseconvnet as scn
 
 from .cluster_cnn.utils import add_normalized_coordinates
-from .cluster_cnn.loss import DiscriminativeLoss
+from .cluster_cnn.losses.single_layers import DiscriminativeLoss
 from mlreco.models.uresnet import UResNet
 
 
@@ -17,7 +17,7 @@ class ClusterCNN(UResNet):
         final linear layer. 
         - embedding_dim: dimension of final embedding space for clustering. 
     '''
-    def __init__(self, cfg, name='clusterunet'):
+    def __init__(self, cfg, name='clustercnn_single'):
         super(ClusterCNN, self).__init__(cfg, name)
         self._coordConv = self._model_config.get('coordConv', False)
         self._embedding_dim = self._model_config.get('embedding_dim', 8)
