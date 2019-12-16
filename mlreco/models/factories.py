@@ -17,10 +17,6 @@ def model_dict():
 
     from . import discriminative_loss
     from . import clustercnn_single
-    from . import clustercnn_stable
-    from . import clustercnn_stack
-    from . import clustercnn_distances
-    from . import clustercnn_offset
     from . import clustercnn_se
     from . import clustercnn_density
 
