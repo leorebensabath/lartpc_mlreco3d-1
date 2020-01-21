@@ -52,7 +52,7 @@ class MultiScaleLoss(DiscriminativeLoss):
             index = slabels[:, 3].int() == bidx
             embedding_batch = embedding[index]
             slabels_batch = slabels[index][:, -1]
-            clabels_batch = clabels[index][:, -1]
+            clabels_batch = clabels[index][:, -2]
             # Compute discriminative loss for current event in batch
             if self.use_segmentation:
                 loss_dict, acc_segs = self.combine_multiclass(
@@ -284,7 +284,7 @@ class WeightedMultiLoss(MultiScaleLoss):
         super(WeightedMultiLoss, self).__init__(cfg, name=name)
         self.attention_kernel = self.loss_config.get('attention_kernel', 1)
         if self.attention_kernel == 0:
-            self.kernel_func = lambda x: 1.0 + torch.exp(-x)
+            self.kernel_func = lambda x: (1.0 + torch.exp(-x)) / 2.0
         elif self.attention_kernel == 1:
             self.kernel_func = lambda x: 2.0 / (1 + torch.exp(-x))
         else:
@@ -410,7 +410,7 @@ class WeightedMultiLoss(MultiScaleLoss):
                         k = int(class_)
                         class_mask = slabels_event[:, -1] == class_
                         embedding_class = hypercoordinates[class_mask]
-                        cluster_class = clabels_event[class_mask][:, -1]
+                        cluster_class = clabels_event[class_mask][:, -2]
                         coords_class = coords_event[class_mask][:, :3]
                         # Clustering Loss
                         if depth == 0:
@@ -443,11 +443,298 @@ class WeightedMultiLoss(MultiScaleLoss):
         return res
 
 
-class DistanceEstimationLoss(MultiScaleLoss2):
-
+class DistanceEstimationLoss(MultiScaleLoss):
 
     def __init__(self, cfg, name='clustering_loss'):
-        super(DistanceEstimationLoss, self).__init__(cfg, name='uresnet')
+        super().__init__(cfg)
+        print('Distance Estimation')
+        self.loss_config = cfg['modules'][name]
+        self.huber_loss = torch.nn.SmoothL1Loss(reduction='mean')
+        self.distance_estimate_weight = self.loss_config.get('distance_estimate_weight', 1.0)
+        self.clustering_weight = self.loss_config.get('clustering_weight', 1.0)
+        print(self)
+
+    def get_nn_map(self, embedding_class, cluster_class):
+        """
+        Computes voxel team loss.
+
+        INPUTS:
+            (torch.Tensor)
+            - embedding_class: class-masked hyperspace embedding
+            - cluster_class: class-masked cluster labels
+
+        RETURNS:
+            - loss (torch.Tensor): scalar tensor representing aggregated loss.
+            - dlossF (dict of floats): dictionary of ally loss.
+            - dlossE (dict of floats): dictionary of enemy loss.
+            - dloss_map (torch.Tensor): computed ally/enemy affinity for each voxel. 
+        """
+        with torch.no_grad():
+            allyMap = torch.zeros(embedding_class.shape[0])
+            enemyMap = torch.zeros(embedding_class.shape[0])
+            if torch.cuda.is_available():
+                allyMap = allyMap.cuda()
+                enemyMap = enemyMap.cuda() 
+            dist = distance_matrix(embedding_class)
+            cluster_ids = cluster_class.unique().int()
+            num_clusters = float(cluster_ids.shape[0])
+            for c in cluster_ids:
+                index = cluster_class.int() == c
+                allies = dist[index, :][:, index]
+                num_allies = allies.shape[0]
+                if num_allies <= 1:
+                    # Skip if only one point
+                    continue
+                ind = np.diag_indices(num_allies)
+                allies[ind[0], ind[1]] = float('inf')
+                allies, _ = torch.min(allies, dim=1)
+                allyMap[index] = allies
+                if index.all(): 
+                    # Skip if there are no enemies
+                    continue
+                enemies, _ = torch.min(dist[index, :][:, ~index], dim=1)
+                enemyMap[index] = enemies
+
+            nnMap = torch.cat([allyMap.view(-1, 1), enemyMap.view(-1, 1)], dim=1)         
+            return nnMap
+
+
+    def forward(self, result, segment_label, cluster_label):
+        '''
+        Mostly borrowed from uresnet_clustering.py
+        '''
+        num_gpus = len(segment_label)
+        loss, accuracy = defaultdict(list), defaultdict(list)
+
+        # Loop first over scaled feature maps
+        for i_gpu in range(num_gpus):
+            distance_estimate = result['distance_estimation'][i_gpu]
+            dcoords = distance_estimate.get_spatial_locations()[:, :4]
+            perm = np.lexsort((dcoords[:, 2], dcoords[:, 1], dcoords[:, 0], dcoords[:, 3]))
+            distance_estimate = distance_estimate.features[perm]
+            for depth in range(self.depth):
+
+                batch_ids = segment_label[i_gpu][depth][:, 3].detach().cpu().int().numpy()
+                batch_ids = np.unique(batch_ids)
+                batch_size = len(batch_ids)
+
+                embedding = result['cluster_feature'][i_gpu][depth]
+                clabels_depth = cluster_label[i_gpu][depth]
+                slabels_depth = segment_label[i_gpu][depth]
+
+                coords = embedding.get_spatial_locations()[:, :4]
+                perm = np.lexsort((coords[:, 2], coords[:, 1], coords[:, 0], coords[:, 3]))
+                coords = coords[perm].float().cuda()
+                feature_map = embedding.features[perm]
+
+                loss_event = defaultdict(list)
+                acc_event = defaultdict(list)
+                for bidx in batch_ids:
+                    batch_mask = coords[:, 3] == bidx
+                    hypercoordinates = feature_map[batch_mask]
+                    slabels_event = slabels_depth[batch_mask]
+                    clabels_event = clabels_depth[batch_mask]
+                    coords_event = coords[batch_mask]
+                    if depth == 0:
+                        distances_event = distance_estimate[batch_mask]
+
+                    # Loop over semantic labels:
+                    semantic_classes = slabels_event[:, -1].unique()
+                    n_classes = len(semantic_classes)
+                    loss_class = defaultdict(list)
+                    acc_class = defaultdict(list)
+                    acc_avg = 0.0
+                    for class_ in semantic_classes:
+                        k = int(class_)
+                        class_mask = slabels_event[:, -1] == class_
+                        # print('Slabels: ', slabels_event[class_mask])
+                        embedding_class = hypercoordinates[class_mask]
+                        cluster_class = clabels_event[class_mask][:, -2]
+                        # print('Clabels: ', clabels_event[class_mask])
+                        coords_class = coords_event[class_mask][:, :3]
+                        # print('Coords: ', coords_class)
+                        # assert False
+                        if depth == 0:
+                            distances_class = distances_event[class_mask]
+                            acc = self.compute_heuristic_accuracy(embedding_class,
+                                                                cluster_class)
+                            accuracy['accuracy_{}'.format(k)].append(acc)
+                            acc_avg += acc / n_classes
+                            dMap = self.get_nn_map(embedding_class, cluster_class)
+                            dloss = self.huber_loss(dMap, distances_class) * self.distance_estimate_weight
+                            loss_class['loss_distance_estimation'].append(dloss)
+                        # Clustering Loss
+                        closs = self.combine(embedding_class,
+                                             cluster_class,
+                            intra_margin=self.intra_margins[depth],
+                            inter_margin=self.inter_margins[depth])
+                        for key, val in closs.items():
+                            loss_class[key].append(val)
+                    if depth == 0:
+                        accuracy['accuracy'].append(acc_avg)
+                    for key, val in loss_class.items():
+                        loss_event[key].append(sum(val) / len(val))
+                for key, val in loss_event.items():
+                    loss[key].append(sum(val) / len(val))
+
+        res = {}
+
+        for key, val in loss.items():
+            res[key] = sum(val) / len(val)
+        res['loss'] += res['loss_distance_estimation']
+        res['loss_distance_estimation'] = float(res['loss_distance_estimation'])
+
+        for key, val in accuracy.items():
+            res[key] = sum(val) / len(val)
+
+        print(res)
+        return res
+
+
+class DistanceEstimationLoss2(MultiScaleLoss2):
+
+    def __init__(self, cfg, name='clustering_loss'):
+        super(DistanceEstimationLoss2, self).__init__(cfg, name='uresnet')
+        self.loss_config = cfg['modules'][name]
+        self.huber_loss = torch.nn.SmoothL1Loss(reduction='mean')
+        self.distance_estimate_weight = self.loss_config.get('distance_estimate_weight', 1.0)
+        self.clustering_weight = self.loss_config.get('clustering_weight', 1.0)
+
+    def get_nn_map(self, embedding_class, cluster_class):
+        """
+        Computes voxel team loss.
+
+        INPUTS:
+            (torch.Tensor)
+            - embedding_class: class-masked hyperspace embedding
+            - cluster_class: class-masked cluster labels
+
+        RETURNS:
+            - loss (torch.Tensor): scalar tensor representing aggregated loss.
+            - dlossF (dict of floats): dictionary of ally loss.
+            - dlossE (dict of floats): dictionary of enemy loss.
+            - dloss_map (torch.Tensor): computed ally/enemy affinity for each voxel. 
+        """
+        with torch.no_grad():
+            allyMap = torch.zeros(embedding_class.shape[0])
+            enemyMap = torch.zeros(embedding_class.shape[0])
+            if torch.cuda.is_available():
+                allyMap = allyMap.cuda()
+                enemyMap = enemyMap.cuda() 
+            dist = distance_matrix(embedding_class)
+            cluster_ids = cluster_class.unique().int()
+            num_clusters = float(cluster_ids.shape[0])
+            for c in cluster_ids:
+                index = cluster_class.int() == c
+                allies = dist[index, :][:, index]
+                num_allies = allies.shape[0]
+                if num_allies <= 1:
+                    # Skip if only one point
+                    continue
+                ind = np.diag_indices(num_allies)
+                allies[ind[0], ind[1]] = float('inf')
+                allies, _ = torch.min(allies, dim=1)
+                allyMap[index] = allies
+                if index.all(): 
+                    # Skip if there are no enemies
+                    continue
+                enemies, _ = torch.min(dist[index, :][:, ~index], dim=1)
+                enemyMap[index] = enemies
+
+            nnMap = torch.cat([allyMap.view(-1, 1), enemyMap.view(-1, 1)], dim=1)         
+            return nnMap
+
+
+    def forward(self, result, segment_label, cluster_label):
+        '''
+        Mostly borrowed from uresnet_clustering.py
+        '''
+        num_gpus = len(segment_label)
+        loss, accuracy = defaultdict(list), defaultdict(list)
+
+        # Loop first over scaled feature maps
+        for i_gpu in range(num_gpus):
+            distance_estimate = result['distance_estimation'][i_gpu]
+            dcoords = distance_estimate.get_spatial_locations()[:, :4]
+            perm = np.lexsort((dcoords[:, 2], dcoords[:, 1], dcoords[:, 0], dcoords[:, 3]))
+            distance_estimate = distance_estimate.features[perm]
+            for depth in range(self.depth):
+
+                batch_ids = segment_label[i_gpu][depth][:, 3].detach().cpu().int().numpy()
+                batch_ids = np.unique(batch_ids)
+                batch_size = len(batch_ids)
+
+                embedding = result['cluster_feature'][i_gpu][depth]
+                clabels_depth = cluster_label[i_gpu][depth]
+                slabels_depth = segment_label[i_gpu][depth]
+
+                coords = embedding.get_spatial_locations()[:, :4]
+                perm = np.lexsort((coords[:, 2], coords[:, 1], coords[:, 0], coords[:, 3]))
+                coords = coords[perm].float().cuda()
+                feature_map = embedding.features[perm]
+
+                loss_event = defaultdict(list)
+                acc_event = defaultdict(list)
+                for bidx in batch_ids:
+                    batch_mask = coords[:, 3] == bidx
+                    hypercoordinates = feature_map[batch_mask]
+                    slabels_event = slabels_depth[batch_mask]
+                    clabels_event = clabels_depth[batch_mask]
+                    coords_event = coords[batch_mask]
+                    if depth == 0:
+                        distances_event = distance_estimate[batch_mask]
+
+                    # Loop over semantic labels:
+                    semantic_classes = slabels_event[:, -1].unique()
+                    n_classes = len(semantic_classes)
+                    loss_class = defaultdict(list)
+                    acc_class = defaultdict(list)
+                    acc_avg = 0.0
+                    for class_ in semantic_classes:
+                        k = int(class_)
+                        class_mask = slabels_event[:, -1] == class_
+                        embedding_class = hypercoordinates[class_mask]
+                        cluster_class = clabels_event[class_mask][:, -2]
+                        coords_class = coords_event[class_mask][:, :3]
+                        if depth == 0:
+                            distances_class = distances_event[class_mask]
+                            acc = self.compute_heuristic_accuracy(embedding_class,
+                                                                cluster_class)
+                            accuracy['accuracy_{}'.format(k)].append(acc)
+                            acc_avg += acc / n_classes
+                            dMap = self.get_nn_map(embedding_class, cluster_class)
+                            dloss = self.huber_loss(dMap, distances_class) * self.distance_estimate_weight
+                            loss_class['loss_distance_estimation'].append(dloss)
+                        # Clustering Loss
+                        closs = self.combine(embedding_class,
+                                             cluster_class,
+                            intra_margin=self.intra_margins[depth],
+                            inter_margin=self.inter_margins[depth])
+                        for key, val in closs.items():
+                            loss_class[key].append(val)
+                    if depth == 0:
+                        accuracy['accuracy'].append(acc_avg)
+                    for key, val in loss_class.items():
+                        loss_event[key].append(sum(val) / len(val))
+                for key, val in loss_event.items():
+                    loss[key].append(sum(val) / len(val))
+
+        res = {}
+
+        for key, val in loss.items():
+            res[key] = sum(val) / len(val)
+        res['loss'] += res['loss_distance_estimation']
+        res['loss_distance_estimation'] = float(res['loss_distance_estimation'])
+
+        for key, val in accuracy.items():
+            res[key] = sum(val) / len(val)
+
+        return res
+
+class DistanceEstimationLoss3(WeightedMultiLoss):
+
+    def __init__(self, cfg, name='clustering_loss'):
+        super(DistanceEstimationLoss3, self).__init__(cfg, name='uresnet')
         self.loss_config = cfg['modules'][name]
         self.huber_loss = torch.nn.SmoothL1Loss(reduction='mean')
         self.distance_estimate_weight = self.loss_config.get('distance_estimate_weight', 1.0)
@@ -548,7 +835,7 @@ class DistanceEstimationLoss(MultiScaleLoss2):
                         k = int(class_)
                         class_mask = slabels_event[:, -1] == class_
                         embedding_class = hypercoordinates[class_mask]
-                        cluster_class = clabels_event[class_mask][:, -1]
+                        cluster_class = clabels_event[class_mask][:, -2]
                         coords_class = coords_event[class_mask][:, :3]
                         if depth == 0:
                             distances_class = distances_event[class_mask]
@@ -563,7 +850,8 @@ class DistanceEstimationLoss(MultiScaleLoss2):
                         closs = self.combine(embedding_class,
                                              cluster_class,
                             intra_margin=self.intra_margins[depth],
-                            inter_margin=self.inter_margins[depth])
+                            inter_margin=self.inter_margins[depth],
+                            coords=coords_class)
                         for key, val in closs.items():
                             loss_class[key].append(val)
                     if depth == 0:
@@ -582,8 +870,6 @@ class DistanceEstimationLoss(MultiScaleLoss2):
 
         for key, val in accuracy.items():
             res[key] = sum(val) / len(val)
-
-        #print(res)
 
         return res
 
@@ -971,7 +1257,7 @@ class DensityDistanceEstimationLoss(DistanceEstimationLoss):
                         k = int(class_)
                         class_mask = slabels_event[:, -1] == class_
                         embedding_class = hypercoordinates[class_mask]
-                        cluster_class = clabels_event[class_mask][:, -1]
+                        cluster_class = clabels_event[class_mask][:, -2]
                         coords_class = coords_event[class_mask][:, :3]
                         if depth == 0:
                             distances_class = distances_event[class_mask]

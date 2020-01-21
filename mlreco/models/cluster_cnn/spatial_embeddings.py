@@ -18,6 +18,7 @@ class SpatialEmbeddings1(UResNet):
             self.model_config = cfg
         self.seedDim = self.model_config.get('seediness_dim', 1)
         self.sigmaDim = self.model_config.get('sigma_dim', 1)
+        self.seed_freeze = self.model_config.get('seed_freeze', False)
         # Define Separate Sparse UResNet Decoder for seediness.
         self.decoding_block2 = scn.Sequential()
         self.decoding_conv2 = scn.Sequential()
@@ -39,6 +40,15 @@ class SpatialEmbeddings1(UResNet):
         self.outputSeediness = scn.Sequential()
         self._nin_block(self.outputSeediness, self.num_filters, self.seedDim)
         self.outputSeediness.add(scn.OutputLayer(self.dimension))
+
+        if self.seed_freeze:
+            print('Seediness Branch Freezed')
+            for p in self.decoding_block2.parameters():
+                p.requires_grad = False
+            for p in self.decoding_conv2.parameters():
+                p.requires_grad = False
+            for p in self.outputSeediness.parameters():
+                p.requires_grad = False
 
         # Pytorch Activations
         self.tanh = nn.Tanh()
@@ -81,6 +91,7 @@ class SpatialEmbeddings1(UResNet):
         point_cloud, = input
         coords = point_cloud[:, 0:self.dimension+1].float()
         features = point_cloud[:, self.dimension+1:].float()
+        features = features[:, -1].view(-1, 1)
 
         x = self.input((coords, features))
         encoder_res = self.encoder(x)

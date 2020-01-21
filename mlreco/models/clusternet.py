@@ -142,6 +142,7 @@ class ClusteringLoss(nn.Module):
         self.loss_func_name = self.loss_config.get('name', 'multi')
         self.loss_func = clustering_loss_construct(self.loss_func_name)
         self.loss_func = self.loss_func(cfg)
+        print(self.loss_func)
 
     def forward(self, result, segment_label, cluster_label):
         '''

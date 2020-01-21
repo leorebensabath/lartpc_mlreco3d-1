@@ -244,7 +244,7 @@ class DiscriminativeLoss(torch.nn.Module):
         for i in range(num_gpus):
             slabels = semantic_labels[i][:, -1]
             slabels = slabels.int()
-            clabels = group_labels[i][:, -1]
+            clabels = group_labels[i][:, -2]
             batch_idx = semantic_labels[i][:, 3]
             embedding = out['cluster_feature'][i]
             nbatch = batch_idx.unique().shape[0]

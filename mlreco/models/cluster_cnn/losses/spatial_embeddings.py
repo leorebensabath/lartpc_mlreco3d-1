@@ -5,7 +5,7 @@ from torch.autograd import Variable
 import numpy as np
 import sparseconvnet as scn
 
-from .lovasz import mean, lovasz_hinge_flat, StableBCELoss
+from .lovasz import mean, lovasz_hinge_flat, StableBCELoss, iou_binary
 from .misc import FocalLoss, WeightedFocalLoss
 from collections import defaultdict
 
@@ -83,6 +83,7 @@ class MaskBCELoss(nn.Module):
             p = torch.clamp(torch.exp(-dists / (2 * torch.pow(sigma, 2))), min=0, max=1)
             probs[index] = p[index]
             loss += self.bceloss(p, mask)
+            acc += iou_binary(p > 0.5, mask)
             sigma_detach = sigma.detach()
             smoothing_loss += torch.sum(torch.pow(margins[index] - sigma_detach, 2))
 
@@ -145,7 +146,7 @@ class MaskBCELoss(nn.Module):
             if torch.cuda.is_available():
                 coords = coords.cuda()
             slabels = slabels.int()
-            clabels = group_label[i][:, -1]
+            clabels = group_label[i][:, -2]
             batch_idx = segment_label[i][:, 3]
             embedding = out['embeddings'][i]
             seediness = out['seediness'][i]
@@ -214,6 +215,7 @@ class MaskBCELoss2(MaskBCELoss):
             p = torch.clamp(torch.exp(-dists / (2 * torch.pow(sigma, 2))), min=0, max=1)
             probs[index] = p[index]
             loss += self.bceloss(p, mask)
+            acc += iou_binary(p > 0.5, mask, per_image=False)
             sigma_detach = sigma.detach()
             smoothing_loss += torch.sum(torch.pow(margins[index] - sigma_detach, 2))
 
@@ -370,7 +372,7 @@ class MaskLovaszInterLoss(MaskLovaszHingeLoss):
         n_clusters = len(centroids)
         cluster_labels = labels.unique(sorted=True)
         probs = torch.zeros(embeddings.shape[0]).float().cuda()
-        acc = 0.0
+        accuracy = 0.0
 
         for i, c in enumerate(cluster_labels):
             index = (labels == c)
@@ -382,16 +384,17 @@ class MaskLovaszInterLoss(MaskLovaszHingeLoss):
             p = torch.exp(-dists / (2 * torch.pow(sigma, 2)))
             probs[index] = p[index]
             loss += lovasz_hinge_flat(2 * p - 1, mask)
+            accuracy += iou_binary(p > 0.5, mask, per_image=False)
             sigma_detach = sigma.detach()
             smoothing_loss += torch.sum(torch.pow(margins[index] - sigma_detach, 2))
 
         loss /= n_clusters
         smoothing_loss /= n_clusters
-        acc /= n_clusters
+        accuracy /= n_clusters
         loss += inter_loss
         loss += reg_loss / n_clusters
 
-        return loss, smoothing_loss, inter_loss, probs, acc
+        return loss, smoothing_loss, inter_loss, probs, accuracy
 
 
     def combine_multiclass(self, embeddings, margins, seediness, slabels, clabels, coords):
@@ -443,47 +446,6 @@ class MaskLovaszInterLoss(MaskLovaszHingeLoss):
         return loss, accuracy
 
 
-class EllipsoidalKernelLoss(MaskLovaszInterLoss):
-
-    def __init__(self, cfg, name='clustering_loss'):
-        super(EllipsoidalKernelLoss, self).__init__(cfg)
-        
-
-    def get_per_class_probabilities(self, embeddings, margins, labels, coords):
-        '''
-        Computes binary foreground/background loss.
-        '''
-        loss = 0.0
-        smoothing_loss = 0.0
-        centroids = self.find_cluster_means(embeddings, labels)
-        inter_loss = self.inter_cluster_loss(centroids)
-        n_clusters = len(centroids)
-        cluster_labels = labels.unique(sorted=True)
-        probs = torch.zeros(embeddings.shape[0]).float().cuda()
-        acc = 0.0
-
-        for i, c in enumerate(cluster_labels):
-            index = (labels == c)
-            mask = torch.zeros(embeddings.shape[0]).cuda()
-            mask[index] = 1
-            mask[~index] = 0
-            sigma = torch.mean(margins[index], dim=0)
-            dists = torch.pow(embeddings - centroids[i], 2)
-            dists = dists / (2 * torch.pow(sigma, 2))
-            p = torch.clamp(torch.exp(-torch.sum(dists, dim=1)), min=0, max=1)
-            probs[index] = p[index]
-            loss += lovasz_hinge_flat(2 * p - 1, mask)
-            sigma_detach = sigma.detach()
-            smoothing_loss += torch.sum(torch.pow(margins[index] - sigma_detach, 2))
-
-        loss /= n_clusters
-        smoothing_loss /= n_clusters
-        acc /= n_clusters
-        loss += inter_loss
-
-        return loss, smoothing_loss, inter_loss, probs, acc
-
-
 class MaskFocalLoss(MaskBCELoss2):
     '''
     Spatial Embeddings Loss with trainable center of attention.
@@ -515,6 +477,7 @@ class MaskFocalLoss(MaskBCELoss2):
             p = torch.clamp(torch.exp(-dists / (2 * torch.pow(sigma, 2))), min=0, max=1)
             probs[index] = p[index]
             loss += self.bceloss(p, mask)
+            acc += iou_binary(p > 0.5, mask, per_image=False)
             sigma_detach = sigma.detach()
             smoothing_loss += torch.sum(torch.pow(margins[index] - sigma_detach, 2))
 
@@ -530,3 +493,115 @@ class MaskWeightedFocalLoss(MaskFocalLoss):
     def __init__(self, cfg, name='clustering_loss'):
         super(MaskWeightedFocalLoss, self).__init__(cfg)
         self.bceloss = WeightedFocalLoss(logits=False)
+
+
+class EllipsoidalKernelLoss(MaskLovaszInterLoss):
+
+    def __init__(self, cfg, name='clustering_loss'):
+        super(EllipsoidalKernelLoss, self).__init__(cfg)
+        self.quaternion_weight = self.loss_config.get('quaternion_weight', 10.0)
+
+    @staticmethod
+    def geodesic_distance_S3(qArr, qmean):
+        '''
+        Computes geodesic distance of q1, q2 in SO(3) group. 
+        '''
+        qmeans = qmean.expand_as(qArr)
+        dist = torch.abs(torch.sum(qArr * qmeans, dim=1))
+        dist = 1 - dist
+        return dist
+
+    @staticmethod
+    def average_quaternions(q):
+        '''
+        Correct averaging scheme for quaternion orientation estimation.
+
+        INPUTS:
+            - q: (N x 4) Tensor of unit quaternions
+        '''
+        try:
+            qtq = torch.mm(q.t(), q)
+            qAvg = torch.symeig(qtq, eigenvectors=True)[1][-1]
+        except:
+            perm = torch.randperm(q.size(0))
+            idx = perm[0]
+            qAvg = q[idx]
+        return qAvg
+
+
+    @staticmethod
+    def generate_covariance_matrix(sigma, q, eps=1e-8):
+        '''
+        Generate covariance matrix from principal components <sigma> and
+        unit quarternion q.
+        '''
+        var = torch.pow(sigma, 2)
+        U = torch.zeros(var.shape[0]**2).cuda()
+        U[0] = q[0]**2 + q[1]**2 - q[2]**2 - q[3]**2
+        U[1] = 2*q[1]*q[2] - 2*q[0]*q[3]
+        U[2] = 2*q[1]*q[3] + 2*q[0]*q[2]
+        U[3] = 2*q[1]*q[2] + 2*q[0]*q[3]
+        U[4] = q[0]**2 - q[1]**2 + q[2]**2 - q[3]**2
+        U[5] = 2*q[2]*q[3] - 2*q[0]*q[1]
+        U[6] = 2*q[1]*q[3] - 2*q[0]*q[2]
+        U[7] = 2*q[2]*q[3] + 2*q[0]*q[1]
+        U[8] = q[0]**2 - q[1]**2 - q[2]**2 + q[3]**2
+        U = U.view(3, 3)
+        D = torch.diag(1.0 / (var + eps))
+        cov = torch.chain_matmul(U, D, U.t())
+        return cov
+        
+    
+    def get_per_class_probabilities(self, embeddings, margins, labels, coords):
+        '''
+        Computes binary foreground/background loss.
+        '''
+        loss = 0.0
+        smoothing_loss = 0.0
+        centroids = self.find_cluster_means(embeddings, labels)
+        inter_loss = self.inter_cluster_loss(centroids)
+        reg_loss = self.regularization(centroids)
+        n_clusters = len(centroids)
+        cluster_labels = labels.unique(sorted=True)
+        probs = torch.zeros(embeddings.shape[0]).float().cuda()
+        accuracy = 0.0
+
+        for i, c in enumerate(cluster_labels):
+            index = (labels == c)
+            # Generate Ground Truth Mask
+            mask = torch.zeros(embeddings.shape[0]).cuda()
+            mask[index] = 1.0
+            mask[~index] = 0.0
+            # Obtain Axes and rotation from network
+            sigma = torch.mean(margins[index][:, :3], dim=0)
+            quat = margins[index][:, 3:]
+            quat = quat / torch.norm(quat, dim=1, keepdim=True)
+            # Average quaternions using metric defined on SO(3)
+            q = self.average_quaternions(quat)
+            covInverse = self.generate_covariance_matrix(sigma, q)
+            offset = embeddings - centroids[i]
+            # Compute argument inside exponential
+            dists = torch.mm(covInverse, offset.t()).t()
+            dists = torch.bmm(
+                offset.view(offset.shape[0], 1, -1), 
+                dists.view(dists.shape[0], -1, 1))
+            dists = dists.squeeze(2)
+            p = torch.clamp(torch.exp(-dists), min=0, max=1).squeeze(1)
+            probs[index] = p[index]
+            loss += lovasz_hinge_flat(2.0 * p - 1.0, mask)
+            accuracy += iou_binary(p > 0.5, mask, per_image=False)
+            sigma_detach = sigma.detach()
+            smoothing_loss += torch.sum(torch.pow(
+                margins[index][:, :3] - sigma_detach, 2))
+            qdetach = q.detach()
+            smoothing_loss += self.quaternion_weight * torch.mean(
+                self.geodesic_distance_S3(quat, qdetach))
+            
+
+        loss /= n_clusters
+        smoothing_loss /= n_clusters
+        accuracy /= n_clusters
+        loss += inter_loss
+        loss += reg_loss / n_clusters
+
+        return loss, smoothing_loss, inter_loss, probs, accuracy

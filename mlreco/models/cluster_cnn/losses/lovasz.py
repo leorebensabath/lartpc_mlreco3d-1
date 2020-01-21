@@ -33,7 +33,7 @@ def lovasz_grad(gt_sorted):
     return jaccard
 
 
-def iou_binary(preds, labels, EMPTY=1., ignore=None, per_image=True):
+def iou_binary(preds, labels, EMPTY=1., per_image=True):
     """
     IoU for foreground class
     binary: 1 foreground, 0 background
@@ -43,14 +43,33 @@ def iou_binary(preds, labels, EMPTY=1., ignore=None, per_image=True):
     ious = []
     for pred, label in zip(preds, labels):
         intersection = ((label == 1) & (pred == 1)).sum()
-        union = ((label == 1) | ((pred == 1) & (label != ignore))).sum()
+        union = ((label == 1) | ((pred == 1))).sum()
         if not union:
             iou = EMPTY
         else:
             iou = float(intersection) / float(union)
         ious.append(iou)
     iou = mean(ious)    # mean accross images if per_image
-    return 100 * iou
+    return iou
+
+# def iou_binary(preds, labels, EMPTY=1., ignore=None, per_image=True):
+#     """
+#     IoU for foreground class
+#     binary: 1 foreground, 0 background
+#     """
+#     if not per_image:
+#         preds, labels = (preds,), (labels,)
+#     ious = []
+#     for pred, label in zip(preds, labels):
+#         intersection = ((label == 1) & (pred == 1)).sum()
+#         union = ((label == 1) | ((pred == 1) & (label != ignore))).sum()
+#         if not union:
+#             iou = EMPTY
+#         else:
+#             iou = float(intersection) / float(union)
+#         ious.append(iou)
+#     iou = mean(ious)    # mean accross images if per_image
+#     return 100 * iou
 
 
 def iou(preds, labels, C, EMPTY=1., ignore=None, per_image=False):
@@ -111,6 +130,7 @@ def lovasz_hinge_flat(logits, labels):
     gt_sorted = labels[perm]
     grad = lovasz_grad(gt_sorted)
     loss = torch.dot(F.relu(errors_sorted), Variable(grad))
+    # return loss
     return loss
 
 

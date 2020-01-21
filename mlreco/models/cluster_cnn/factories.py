@@ -38,8 +38,8 @@ def clustering_loss_dict():
     loss = {
         'single': losses.single_layers.DiscriminativeLoss,
         'multi': losses.multi_layers.MultiScaleLoss,
-        'multi-weighted': losses.multi_layers.WeightedMultiLoss,
-        'multi-repel': losses.multi_layers.MultiScaleLoss2,
+        'multi-weighted': losses.multi_layers.DistanceEstimationLoss3,
+        'multi-repel': losses.multi_layers.DistanceEstimationLoss2,
         'multi-distance': losses.multi_layers.DistanceEstimationLoss,
         'se_bce': losses.spatial_embeddings.MaskBCELoss2,
         'se_bce_ellipse': losses.spatial_embeddings.MaskBCELossBivariate,
@@ -68,6 +68,7 @@ def cluster_model_construct(name):
 
 def clustering_loss_construct(name):
     loss_fns = clustering_loss_dict()
+    print(name)
     if not name in loss_fns:
         raise Exception("Unknown clustering loss function name provided")
     return loss_fns[name]

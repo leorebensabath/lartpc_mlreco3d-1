@@ -39,6 +39,7 @@ class UResNet(torch.nn.Module):
         point_cloud, = input
         coords = point_cloud[:, :self._dimension+1].float()
         features = point_cloud[:, self._dimension+1:].float()
+        features = features[:, -1].view(-1, 1)
         x = self.sparseModel((coords, features))
         x = self.linear(x)
         return {"segmentation" : [x]}
