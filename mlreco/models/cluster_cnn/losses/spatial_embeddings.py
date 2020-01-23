@@ -512,7 +512,7 @@ class EllipsoidalKernelLoss(MaskLovaszInterLoss):
         return dist
 
     @staticmethod
-    def average_quaternions(q):
+    def average_quaternions(q, num_samples=100):
         '''
         Correct averaging scheme for quaternion orientation estimation.
 
@@ -523,11 +523,36 @@ class EllipsoidalKernelLoss(MaskLovaszInterLoss):
             qtq = torch.mm(q.t(), q)
             qAvg = torch.symeig(qtq, eigenvectors=True)[1][-1]
         except:
-            perm = torch.randperm(q.size(0))
-            idx = perm[0]
-            qAvg = q[idx]
+            qAvg = q[0]
         return qAvg
 
+    @staticmethod
+    def generate_rotation_matrix(q):
+        U = torch.zeros((3,3)).cuda()
+        U[0,0] = q[0]**2 + q[1]**2 - q[2]**2 - q[3]**2
+        U[0,1] = 2*q[1]*q[2] - 2*q[0]*q[3]
+        U[0,2] = 2*q[1]*q[3] + 2*q[0]*q[2]
+        U[1,0] = 2*q[1]*q[2] + 2*q[0]*q[3]
+        U[1,1] = q[0]**2 - q[1]**2 + q[2]**2 - q[3]**2
+        U[1,2] = 2*q[2]*q[3] - 2*q[0]*q[1]
+        U[2,0] = 2*q[1]*q[3] - 2*q[0]*q[2]
+        U[2,1] = 2*q[2]*q[3] + 2*q[0]*q[1]
+        U[2,2] = q[0]**2 - q[1]**2 - q[2]**2 + q[3]**2
+        return U
+
+    @staticmethod
+    def generate_rotation_matrix_batch(qArr):
+        UArr = torch.zeros((qArr.shape[0], 3, 3))
+        U[:, 0, 0] = q[:, 0]**2 + q[:, 1]**2 - q[:, 2]**2 - q[:, 3]**2
+        U[:, 0, 1] = 2*q[:, 1]*q[:, 2] - 2*q[:, 0]*q[:, 3]
+        U[:, 0, 2] = 2*q[:, 1]*q[:, 3] + 2*q[:, 0]*q[:, 2]
+        U[:, 1, 0] = 2*q[:, 1]*q[:, 2] + 2*q[:, 0]*q[:, 3]
+        U[:, 1, 1] = q[:, 0]**2 - q[:, 1]**2 + q[:, 2]**2 - q[:, 3]**2
+        U[:, 1, 2] = 2*q[:, 2]*q[:, 3] - 2*q[:, 0]*q[:, 1]
+        U[:, 2, 0] = 2*q[:, 1]*q[:, 3] - 2*q[:, 0]*q[:, 2]
+        U[:, 2, 1] = 2*q[:, 2]*q[:, 3] + 2*q[:, 0]*q[:, 1]
+        U[:, 2, 2] = q[:, 0]**2 - q[:, 1]**2 - q[:, 2]**2 + q[:, 3]**2
+        return UArr
 
     @staticmethod
     def generate_covariance_matrix(sigma, q, eps=1e-8):
@@ -536,17 +561,7 @@ class EllipsoidalKernelLoss(MaskLovaszInterLoss):
         unit quarternion q.
         '''
         var = torch.pow(sigma, 2)
-        U = torch.zeros(var.shape[0]**2).cuda()
-        U[0] = q[0]**2 + q[1]**2 - q[2]**2 - q[3]**2
-        U[1] = 2*q[1]*q[2] - 2*q[0]*q[3]
-        U[2] = 2*q[1]*q[3] + 2*q[0]*q[2]
-        U[3] = 2*q[1]*q[2] + 2*q[0]*q[3]
-        U[4] = q[0]**2 - q[1]**2 + q[2]**2 - q[3]**2
-        U[5] = 2*q[2]*q[3] - 2*q[0]*q[1]
-        U[6] = 2*q[1]*q[3] - 2*q[0]*q[2]
-        U[7] = 2*q[2]*q[3] + 2*q[0]*q[1]
-        U[8] = q[0]**2 - q[1]**2 - q[2]**2 + q[3]**2
-        U = U.view(3, 3)
+        U = self.generate_rotation_matrix(q)
         D = torch.diag(1.0 / (var + eps))
         cov = torch.chain_matmul(U, D, U.t())
         return cov
