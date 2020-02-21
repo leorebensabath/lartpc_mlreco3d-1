@@ -35,6 +35,35 @@ def parse_sparse2d_meta(data):
         meta.pixel_height()
     ]
 
+def parse_particle_graph(data):
+    """
+    A function to parse larcv::EventParticle to construct edges between particles (i.e. clusters)
+    Args:
+        length 1 array of larcv::EventParticle
+    Return:
+        a numpy array of directed edges where each edge is (parent,child) cluster index ID.
+    """
+    particles = data[0]
+
+    # For convention, construct particle id => cluster id mapping
+    particle_to_cluster = np.zeros(shape=[particles.as_vector().size()],dtype=np.int32)
+
+    # Fill group mapping
+    for cluster_id in range(particles.as_vector().size()):
+        p = particles.as_vector()[cluster_id]
+        particle_id = p.id()
+        particle_to_cluster[particle_id] = cluster_id
+
+    # Fill edges (directed, [parent,child] pair)
+    edges = np.empty((0,2), dtype = np.int32)
+    for cluster_id in range(particles.as_vector().size()):
+        p = particles.as_vector()[cluster_id]
+        for child in p.children_id():
+            if cluster_id != particle_to_cluster[child]:
+                edges = np.vstack((edges, [cluster_id,particle_to_cluster[child]]))
+
+    return edges
+
 
 def parse_sparse2d_scn(data):
     """
