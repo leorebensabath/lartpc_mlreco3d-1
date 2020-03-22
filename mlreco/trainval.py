@@ -11,7 +11,6 @@ from mlreco.utils.data_parallel import DataParallel
 import numpy as np
 from mlreco.utils.utils import to_numpy
 import re
-from mlreco.models.cluster_cnn.adaptis import Logits
 
 class trainval(object):
     """

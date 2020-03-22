@@ -86,7 +86,7 @@ class SegmentationLoss(torch.nn.modules.loss._Loss):
                 acc = (predicted_labels == event_label).sum().item() / float(predicted_labels.nelement())
                 total_acc += acc
                 count += 1
-        
+
         return {
             'accuracy': total_acc/count,
             'loss': total_loss/count

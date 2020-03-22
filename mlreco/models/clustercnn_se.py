@@ -13,8 +13,8 @@ class ClusterCNN(SpatialEmbeddings1):
 
     Congifurations:
         - coordConv: Option to concat coordinates to input features at
-        final linear layer. 
-        - embedding_dim: dimension of final embedding space for clustering. 
+        final linear layer.
+        - embedding_dim: dimension of final embedding space for clustering.
     '''
     def __init__(self, cfg):
         super(ClusterCNN, self).__init__(cfg)
@@ -26,8 +26,8 @@ class ClusterCNN2(SpatialEmbeddings2):
 
     Congifurations:
         - coordConv: Option to concat coordinates to input features at
-        final linear layer. 
-        - embedding_dim: dimension of final embedding space for clustering. 
+        final linear layer.
+        - embedding_dim: dimension of final embedding space for clustering.
     '''
     def __init__(self, cfg):
         super(ClusterCNN2, self).__init__(cfg)
@@ -45,15 +45,13 @@ class ClusteringLoss(nn.Module):
     '''
     def __init__(self, cfg, name='clustering_loss'):
         super(ClusteringLoss, self).__init__()
+        self.loss_config = cfg['modules']
+        import pprint
+        pprint.pprint(self.loss_config)
 
-        if 'modules' in cfg:
-            self.loss_config = cfg['modules'][name]
-        else:
-            self.loss_config = cfg
-
-        self.loss_func_name = self.loss_config.get('name', 'se_lovasz_inter')
+        self.loss_func_name = self.loss_config[name]['name']
         self.loss_func = clustering_loss_construct(self.loss_func_name)
-        self.loss_func = self.loss_func(cfg)
+        self.loss_func = self.loss_func(self.loss_config)
 
     def forward(self, result, segment_label, cluster_label):
         return self.loss_func(result, segment_label, cluster_label)
@@ -71,7 +69,7 @@ class ClusteringLoss(nn.Module):
 
 
 # class ClusteringLoss3(MaskLovaszHingeLoss):
-    
+
 #     def __init__(self, cfg, name='clustering_loss'):
 #         super(ClusteringLoss3, self).__init__(cfg)
 
@@ -83,7 +81,7 @@ class ClusteringLoss(nn.Module):
 
 
 # class ClusteringLoss6(EllipsoidalKernelLoss):
-    
+
 #     def __init__(self, cfg, name='clustering_loss'):
 #         super(ClusteringLoss6, self).__init__(cfg)
 

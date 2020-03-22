@@ -14,7 +14,7 @@ def backbone_dict():
         "uresnet": uresnet.UResNet,
         "fpn": fpn.FPN
     }
-    
+
     return models
 
 
@@ -35,19 +35,21 @@ def clustering_loss_dict():
     '''
     Returns dictionary of various clustering losses with enhancements.
     '''
+    from .losses import multi_layers, single_layers, spatial_embeddings
     loss = {
-        'single': losses.single_layers.DiscriminativeLoss,
-        'multi': losses.multi_layers.MultiScaleLoss,
-        'multi-weighted': losses.multi_layers.DistanceEstimationLoss3,
-        'multi-repel': losses.multi_layers.DistanceEstimationLoss2,
-        'multi-distance': losses.multi_layers.DistanceEstimationLoss,
-        'se_bce': losses.spatial_embeddings.MaskBCELoss2,
-        'se_bce_ellipse': losses.spatial_embeddings.MaskBCELossBivariate,
-        'se_lovasz': losses.spatial_embeddings.MaskLovaszHingeLoss,
-        'se_lovasz_inter': losses.spatial_embeddings.MaskLovaszInterLoss,
-        'se_lovasz_ellipse': losses.spatial_embeddings.EllipsoidalKernelLoss,
-        'se_focal': losses.spatial_embeddings.MaskFocalLoss,
-        'se_weighted_focal': losses.spatial_embeddings.MaskWeightedFocalLoss
+        'single': single_layers.DiscriminativeLoss,
+        'multi': multi_layers.MultiScaleLoss,
+        'multi-weighted': multi_layers.DistanceEstimationLoss3,
+        'multi-repel': multi_layers.DistanceEstimationLoss2,
+        'multi-distance': multi_layers.DistanceEstimationLoss,
+        'se_bce': spatial_embeddings.MaskBCELoss2,
+        'se_bce_ellipse': spatial_embeddings.MaskBCELossBivariate,
+        'se_lovasz': spatial_embeddings.MaskLovaszHingeLoss,
+        'se_lovasz_inter': spatial_embeddings.MaskLovaszInterLoss,
+        'se_focal': spatial_embeddings.MaskFocalLoss,
+        'se_multivariate': spatial_embeddings.MultiVariateLovasz,
+        'se_multi_entropy': spatial_embeddings.MultiVariateEntropy,
+        'se_multi_tdist': spatial_embeddings.MultiVariateTDist
     }
     return loss
 
@@ -56,7 +58,7 @@ def backbone_construct(name):
     models = backbone_dict()
     if not name in models:
         raise Exception("Unknown backbone architecture name provided")
-    return models[name]    
+    return models[name]
 
 
 def cluster_model_construct(name):

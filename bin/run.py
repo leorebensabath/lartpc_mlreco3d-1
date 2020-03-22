@@ -31,3 +31,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+    # from torch import autograd
+    # with autograd.detect_anomaly():
+    #     main()

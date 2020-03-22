@@ -7,6 +7,7 @@ from __future__ import print_function
 import torch
 import torch.nn as nn
 import sparseconvnet as scn
+import pprint
 
 from mlreco.models.layers.base import NetworkBase
 
@@ -14,7 +15,7 @@ from mlreco.models.layers.base import NetworkBase
 class UResNet(NetworkBase):
     '''
     Vanilla UResNet with access to intermediate layers in
-    encoder/decoder path. 
+    encoder/decoder path.
 
     Configurations
     -------------
@@ -38,6 +39,8 @@ class UResNet(NetworkBase):
             self.model_config = cfg['modules'][name]
         else:
             self.model_config = cfg
+        print('UResNet Configs')
+        pprint.pprint(self.model_config)
 
         # UResNet Configurations
         self.reps = self.model_config.get('reps', 2)  # Conv block repetition factor
@@ -50,7 +53,7 @@ class UResNet(NetworkBase):
         self.downsample = [self.kernel_size, 2]  # [filter size, filter stride]
         self.inputKernel = self.model_config.get('input_kernel_size', 3)
 
-        # Input Layer Configurations and commonly used scn operations. 
+        # Input Layer Configurations and commonly used scn operations.
         self.input = scn.Sequential().add(
             scn.InputLayer(self.dimension, self.spatial_size, mode=3)).add(
             scn.SubmanifoldConvolution(self.dimension, self.nInputFeatures, \
@@ -97,7 +100,7 @@ class UResNet(NetworkBase):
             - x (scn.SparseConvNetTensor): output from inputlayer (self.input)
 
         RETURNS:
-            - features_encoder (list of SparseConvNetTensor): list of feature 
+            - features_encoder (list of SparseConvNetTensor): list of feature
             tensors in encoding path at each spatial resolution.
         '''
         # Embeddings at each layer
@@ -107,14 +110,14 @@ class UResNet(NetworkBase):
             x = self.encoding_block[i](x)
             features_enc.append(x)
             x = self.encoding_conv[i](x)
-        
+
         res = {
             "features_enc": features_enc,
             "deepest_layer": x
         }
 
         return res
-    
+
 
 
     def decoder(self, features_enc, deepest_layer):
@@ -126,7 +129,7 @@ class UResNet(NetworkBase):
 
         RETURNS:
             - features_dec (list of scn.SparseConvNetTensor): list of feature
-            tensors in decoding path at each spatial resolution. 
+            tensors in decoding path at each spatial resolution.
         '''
         features_dec = []
         x = deepest_layer
