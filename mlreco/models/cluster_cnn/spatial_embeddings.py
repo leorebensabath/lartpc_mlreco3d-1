@@ -94,7 +94,7 @@ class SpatialEmbeddings1(UResNet):
             - feature_dec: decoder features at each spatial resolution.
         '''
         point_cloud, = input
-        print("Point Cloud: ", point_cloud)
+        # print("Point Cloud: ", point_cloud)
         coords = point_cloud[:, 0:self.dimension+1].float()
         features = point_cloud[:, self.dimension+1:].float()
         features = features[:, -1].view(-1, 1)

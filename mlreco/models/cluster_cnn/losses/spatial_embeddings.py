@@ -179,7 +179,7 @@ class MaskBCELoss(nn.Module):
             if torch.cuda.is_available():
                 coords = coords.cuda()
             slabels = slabels.int()
-            clabels = group_label[i][:, -2]
+            clabels = group_label[i][:, -1]
             batch_idx = segment_label[i][:, 3]
             embedding = out['embeddings'][i]
             seediness = out['seediness'][i]
@@ -420,13 +420,13 @@ class MaskLovaszInterLoss(MaskLovaszHingeLoss):
             loss += lovasz_hinge_flat(2 * p - 1, mask)
             accuracy += iou_binary(p > 0.5, mask, per_image=False)
             sigma_detach = sigma.detach()
-            smoothing_loss += torch.sum(torch.pow(margins[index] - sigma_detach, 2))
+            smoothing_loss += torch.mean(torch.norm(margins[index] - sigma_detach, dim=1))
 
         loss /= n_clusters
         smoothing_loss /= n_clusters
         accuracy /= n_clusters
         loss += inter_loss
-        loss += reg_loss / n_clusters
+        loss += reg_loss
 
         return loss, smoothing_loss, inter_loss, probs, accuracy
 
