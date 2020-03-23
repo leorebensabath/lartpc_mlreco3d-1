@@ -215,7 +215,7 @@ class MaskBCELoss(nn.Module):
         res = {}
         res.update(loss_avg)
         res.update(acc_avg)
-        # pprint.pprint(res)
+        pprint.pprint(res)
 
         return res
 
@@ -566,6 +566,40 @@ class MultiVariateLovasz(MaskLovaszInterLoss):
         loss += reg_loss
 
         return loss, smoothing_loss, inter_loss, probs, accuracy
+
+
+class MultiVariateLovasz2(MultiVariateLovasz):
+
+    def __init__(self, cfg, name='clustering_loss'):
+        super(MultiVariateLovasz2, self).__init__(cfg)
+
+    def inter_cluster_loss(self, cluster_means, margin=0.2, eps=1e-6):
+        '''
+        Implementation of distance loss in Discriminative Loss.
+        Inputs:
+            cluster_means (torch.Tensor): output from find_cluster_means
+            margin (float/int): the magnitude of the margin delta_d in the paper.
+            Think of it as the distance between each separate clusters in
+            embedding space.
+        Returns:
+            inter_loss (float): computed cross-centroid distance loss (see paper).
+            Factor of 2 is included for proper normalization.
+        '''
+        inter_loss = 0.0
+        n_clusters = len(cluster_means)
+        if n_clusters < 2:
+            # Inter-cluster loss is zero if there only one instance exists for
+            # a semantic label.
+            return 0.0
+        else:
+            for i, c1 in enumerate(cluster_means):
+                for j, c2 in enumerate(cluster_means):
+                    if i != j:
+                        dist = torch.norm(c1 - c2 + 1e-8, p=self.norm)
+                        hinge = torch.clamp(1 / (dist + eps) - 1 / (2 * margin), min=0)
+                        inter_loss += torch.pow(hinge, 2)
+            inter_loss /= float((n_clusters - 1) * n_clusters)
+            return inter_loss
 
 def entropy_loss(x):
     return -torch.sum(x * torch.log(x), dim=1)
