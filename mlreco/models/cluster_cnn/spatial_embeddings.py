@@ -105,11 +105,14 @@ class SpatialEmbeddings1(UResNet):
         features_cluster = self.decoder(features_enc, deepest_layer)
         features_seediness = self.seed_decoder(features_enc, deepest_layer)
 
+        normalized_coords = (coords[:, :3] - self.spatial_size / 2) \
+            / (self.spatial_size / 2)
+
         embeddings = self.outputEmbeddings(features_cluster[-1])
         embeddings[:, :self.dimension] = self.tanh(embeddings[:, :self.dimension])
-        embeddings[:, :self.dimension] += coords[:, :self.dimension] / self.spatial_size
+        embeddings[:, :self.dimension] += normalized_coords
         sigma = 2 * self.sigmoid(embeddings[:, self.dimension:self.dimension+3])
-        l = 2 * self.tanh(embeddings[:, self.dimension+3:])
+        l = embeddings[:, self.dimension+3:]
         margins = torch.cat([sigma, l], dim=1)
         # embeddings[:, self.dimension:self.dimension+3] = \
         #     self.softplus(embeddings[:, self.dimension:self.dimension+3])

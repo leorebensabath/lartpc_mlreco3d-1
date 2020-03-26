@@ -17,6 +17,7 @@ def model_dict():
     from . import clustercnn_single
     from . import clusternet
     from . import clustercnn_se
+    from . import autoencoders
 
 
     # Make some models available (not all of them, e.g. PPN is not standalone)
@@ -53,7 +54,8 @@ def model_dict():
         # Multi Layer Hyperspace Clustering
         "clusternet": (clusternet.ClusterCNN, clusternet.ClusteringLoss),
         # Spatial Embeddings
-        "spatial_embeddings": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss)
+        "spatial_embeddings": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss),
+        "conv_autoencoder": (autoencoders.AutoEncoder, autoencoders.AutoEncoderLoss)
     }
     # "chain_gnn": (chain_gnn.Chain, chain_gnn.ChainLoss)
     return models

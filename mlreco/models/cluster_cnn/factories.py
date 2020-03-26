@@ -48,8 +48,11 @@ def clustering_loss_dict():
         'se_lovasz_inter': spatial_embeddings.MaskLovaszInterLoss,
         'se_focal': spatial_embeddings.MaskFocalLoss,
         'se_multivariate': spatial_embeddings.MultiVariateLovasz,
+        'se_multivariate_quat': spatial_embeddings.MultivariateQuaternion,
         'se_multi_entropy': spatial_embeddings.MultiVariateEntropy,
-        'se_multi_tdist': spatial_embeddings.MultiVariateTDist
+        'se_ce_dice': spatial_embeddings.CEDiceLoss,
+        'se_ce_f1': spatial_embeddings.CEF1Loss,
+        'se_ce_lovasz': spatial_embeddings.CELovaszLoss
     }
     return loss
 

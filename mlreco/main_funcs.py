@@ -274,6 +274,7 @@ def train_loop(cfg, handlers):
 
         # Train step
         data_blob, result_blob = handlers.trainer.train_step(handlers.data_io_iter)
+        # print(data_blob)
 
         # Save snapshot
         if checkpt_step:
