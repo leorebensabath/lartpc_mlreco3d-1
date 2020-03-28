@@ -46,6 +46,7 @@ def clustering_loss_dict():
         'se_bce_ellipse': spatial_embeddings.MaskBCELossBivariate,
         'se_lovasz': spatial_embeddings.MaskLovaszHingeLoss,
         'se_lovasz_inter': spatial_embeddings.MaskLovaszInterLoss,
+        'se_ce_lovasz': spatial_embeddings.CELovaszLoss,
         'se_multivariate_2': spatial_embeddings.MultiVariateLovasz2,
         'se_focal': spatial_embeddings.MaskFocalLoss,
         'se_multivariate': spatial_embeddings.MultiVariateLovasz,

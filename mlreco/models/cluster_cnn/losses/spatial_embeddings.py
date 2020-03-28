@@ -215,7 +215,7 @@ class MaskBCELoss(nn.Module):
         res = {}
         res.update(loss_avg)
         res.update(acc_avg)
-        pprint.pprint(res)
+        # pprint.pprint(res)
 
         return res
 
@@ -481,6 +481,44 @@ class MaskLovaszInterLoss(MaskLovaszHingeLoss):
             accuracy['accuracy_{}'.format(int(sc))] = acc
 
         return loss, accuracy
+
+
+class CELovaszLoss(MaskBCELoss2):
+
+    def __init__(self, cfg, name='clustering_loss'):
+        super(CELovaszLoss, self).__init__(cfg)
+
+    def get_per_class_probabilities(self, embeddings, margins, labels, coords):
+        '''
+        Computes binary foreground/background loss.
+        '''
+        loss = 0.0
+        smoothing_loss = 0.0
+        centroids = self.find_cluster_means(embeddings, labels)
+        n_clusters = len(centroids)
+        cluster_labels = labels.unique(sorted=True)
+        probs = torch.zeros(embeddings.shape[0]).float().cuda()
+        acc = 0.0
+
+        for i, c in enumerate(cluster_labels):
+            index = (labels == c)
+            mask = torch.zeros(embeddings.shape[0]).cuda()
+            mask[index] = 1.0
+            mask[~index] = 0.0
+            sigma = torch.mean(margins[index], dim=0)
+            dists = torch.sum(torch.pow(embeddings - centroids[i], 2), dim=1)
+            p = torch.clamp(torch.exp(-dists / (2 * torch.pow(sigma, 2) + 1e-8)), min=0, max=1)
+            probs[index] = p[index]
+            loss += (self.bceloss(p, mask) + lovasz_hinge_flat(2.0 * p - 1, mask)) / 2
+            acc += iou_binary(p > 0.5, mask, per_image=False)
+            sigma_detach = sigma.detach()
+            smoothing_loss += torch.mean(torch.norm(margins[index] - sigma_detach, dim=1))
+
+        loss /= n_clusters
+        smoothing_loss /= n_clusters
+        acc /= n_clusters
+
+        return loss, smoothing_loss, probs, acc
 
 
 class MaskFocalLoss(MaskBCELoss2):
