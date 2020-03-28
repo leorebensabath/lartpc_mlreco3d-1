@@ -287,7 +287,7 @@ class MaskLovaszHingeLoss(MaskBCELoss2):
         n_clusters = len(centroids)
         cluster_labels = labels.unique(sorted=True)
         probs = torch.zeros(embeddings.shape[0]).float().cuda()
-        acc = 0.0
+        accuracy = 0.0
 
         for i, c in enumerate(cluster_labels):
             index = (labels == c)
@@ -296,17 +296,18 @@ class MaskLovaszHingeLoss(MaskBCELoss2):
             mask[~index] = 0
             sigma = torch.mean(margins[index], dim=0)
             dists = torch.sum(torch.pow(embeddings - centroids[i], 2), dim=1)
-            p = torch.exp(-dists / (2 * torch.pow(sigma, 2)))
+            p = torch.clamp(torch.exp(-dists / (2 * torch.pow(sigma, 2))), min=0, max=1)
             probs[index] = p[index]
             loss += lovasz_hinge_flat(2 * p - 1, mask)
             sigma_detach = sigma.detach()
-            smoothing_loss += torch.sum(torch.pow(margins[index] - sigma_detach, 2))
+            accuracy += iou_binary(p > 0.5, mask, per_image=False)
+            smoothing_loss += torch.mean(torch.norm(margins[index] - sigma_detach, dim=1))
 
         loss /= n_clusters
         smoothing_loss /= n_clusters
-        acc /= n_clusters
+        accuracy /= n_clusters
 
-        return loss, smoothing_loss, probs, acc
+        return loss, smoothing_loss, probs, accuracy
 
 
 class MaskLovaszInterLoss(MaskLovaszHingeLoss):
