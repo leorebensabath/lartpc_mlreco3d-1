@@ -371,7 +371,7 @@ class MaskLovaszInterLoss(MaskLovaszHingeLoss):
         smoothing_loss = 0.0
         centroids = self.find_cluster_means(embeddings, labels)
         inter_loss = self.inter_cluster_loss(centroids)
-        reg_loss = self.regularization(centroids)
+        # reg_loss = self.regularization(centroids)
         n_clusters = len(centroids)
         cluster_labels = labels.unique(sorted=True)
         probs = torch.zeros(embeddings.shape[0]).float().cuda()
@@ -389,13 +389,13 @@ class MaskLovaszInterLoss(MaskLovaszHingeLoss):
             loss += lovasz_hinge_flat(2 * p - 1, mask)
             accuracy += iou_binary(p > 0.5, mask, per_image=False)
             sigma_detach = sigma.detach()
-            smoothing_loss += torch.sum(torch.pow(margins[index] - sigma_detach, 2))
+            smoothing_loss += torch.mean(torch.norm(margins[index] - sigma_detach, dim=1))
 
         loss /= n_clusters
         smoothing_loss /= n_clusters
         accuracy /= n_clusters
         loss += inter_loss
-        loss += reg_loss / n_clusters
+        # loss += reg_loss / n_clusters
 
         return loss, smoothing_loss, inter_loss, probs, accuracy
 
