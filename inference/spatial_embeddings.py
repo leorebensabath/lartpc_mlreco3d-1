@@ -28,26 +28,26 @@ def make_inference_cfg(train_cfg, gpu=1, snapshot=None, batch_size=1, model_path
     process_config(cfg)
     inference_cfg = cfg.copy()
     data_keys = inference_cfg['iotool']['dataset']['data_keys']
-    
+
     # Change dataset to validation samples
     data_val = []
     for file_path in data_keys:
         data_val.append(file_path.replace('train', 'test'))
     inference_cfg['iotool']['dataset']['data_keys'] = data_val
-    
+
     # Change batch size to 1 since no need for batching during validation
     inference_cfg['iotool']['batch_size'] = batch_size
     inference_cfg['iotool'].pop('sampler', None)
     inference_cfg['iotool'].pop('minibatch_size', None)
     inference_cfg['trainval']['gpus'] = str(gpu)
     inference_cfg['trainval']["train"] = False
-    
+
     # Analysis keys for clustering
     inference_cfg['model']["analysis_keys"] = {
         "segmentation": 0,
         "clustering": 1,
     }
-    
+
     # Get latest model path if checkpoint not provided.
     if model_path is None:
         model_path = inference_cfg['trainval']['model_path']
@@ -145,7 +145,7 @@ def fit_predict1(embeddings, seediness, margins, threshold=0.9, cluster_all=Fals
     return pred_labels, spheres
 
 
-def fit_predict2(embeddings, seediness, margins, fitfunc, 
+def fit_predict2(embeddings, seediness, margins, fitfunc,
                  s_threshold=0.0, p_threshold=0.5, cluster_all=False):
     pred_labels = -np.ones(embeddings.shape[0])
     probs = []
@@ -163,16 +163,34 @@ def fit_predict2(embeddings, seediness, margins, fitfunc,
         f = fitfunc(centroid, sigma)
         pValues = f(embeddings)
         probs.append(pValues.reshape(-1, 1))
-        cluster_index = pValues > p_threshold
+        cluster_index = np.logical_and((pValues > p_threshold), (seediness_copy != 0))
+        # print(cluster_index)
         seediness_copy[cluster_index] = 0
         count += sum(cluster_index)
     if len(probs) == 0:
-        return pred_labels, spheres
+        return pred_labels, spheres, 1
+    # while count < seediness.shape[0]:
+    #     i = np.argsort(seediness_copy)[::-1][0]
+    #     seedScore = seediness[i]
+    #     if seedScore < s_threshold:
+    #         break
+    #     centroid = embeddings[i]
+    #     sigma = margins[i]
+    #     spheres.append((centroid, sigma))
+    #     f = fitfunc(centroid, sigma)
+    #     pValues = f(embeddings)
+    #     probs.append(pValues.reshape(-1, 1))
+    #     cluster_index = pValues > p_threshold
+    #     seediness_copy[cluster_index] = 0
+    #     count += sum(cluster_index)
+    # if len(probs) == 0:
+    #     return pred_labels, spheres, 1
+    cluster_count = len(probs)
     probs = np.hstack(probs)
     pred_labels = np.argmax(probs, axis=1)
     # if cluster_all:
     #     pred_labels = cluster_remainder(embeddings, pred_labels)
-    return pred_labels, spheres
+    return pred_labels, spheres, cluster_count
 
 
 def main_loop(train_cfg, **kwargs):
@@ -190,10 +208,12 @@ def main_loop(train_cfg, **kwargs):
 
     inference_cfg['trainval']['iterations'] = len(event_list)
     iterations = inference_cfg['trainval']['iterations']
-    # s_threshold = kwargs['s_threshold']
-    # p_threshold = kwargs['p_threshold']
-    s_thresholds = {0: 0.88, 1: 0.92, 2: 0.84, 3: 0.84, 4: 0.8}
-    p_thresholds = {0: 0.5, 1: 0.5, 2: 0.5, 3: 0.5, 4: 0.5}
+    s_threshold = kwargs['s_threshold']
+    p_threshold = kwargs['p_threshold']
+    # s_thresholds = {0: 0.88, 1: 0.92, 2: 0.84, 3: 0.84, 4: 0.8}
+    # p_thresholds = {0: 0.5, 1: 0.5, 2: 0.5, 3: 0.5, 4: 0.5}
+    s_thresholds = { key : s_threshold for key in range(5)}
+    p_thresholds = { key : p_threshold for key in range(5)}
 
     for i in event_list:
 
@@ -204,8 +224,10 @@ def main_loop(train_cfg, **kwargs):
         embedding = res['embeddings'][0]
         seediness = res['seediness'][0].reshape(-1, )
         margins = res['margins'][0].reshape(-1, )
+        # print(data_blob['segment_label'][0])
+        # print(data_blob['cluster_label'][0])
         semantic_labels = data_blob['segment_label'][0][:, -1]
-        cluster_labels = data_blob['cluster_label'][0][:, -1]
+        cluster_labels = data_blob['cluster_label'][0][:, -2]
         coords = data_blob['input_data'][0][:, :3]
         index = data_blob['index'][0]
 
@@ -219,23 +241,23 @@ def main_loop(train_cfg, **kwargs):
             seed_class = seediness[semantic_mask]
             margins_class = margins[semantic_mask]
             print(index, c)
-            pred, spheres = fit_predict2(embedding_class, seed_class, margins_class, gaussian_kernel,
+            pred, spheres, cluster_count = fit_predict2(embedding_class, seed_class, margins_class, gaussian_kernel,
                                 s_threshold=s_thresholds[int(c)], p_threshold=p_thresholds[int(c)], cluster_all=True)
             purity, efficiency = purity_efficiency(pred, clabels)
             fscore = 2 * (purity * efficiency) / (purity + efficiency)
             ari = ARI(pred, clabels)
-            nclusters = len(np.unique(clabels))
+            true_num_clusters = len(np.unique(clabels))
             _, true_centroids = find_cluster_means(coords_class, clabels)
             for j, cluster_id in enumerate(np.unique(clabels)):
                 margin = np.mean(margins_class[clabels == cluster_id])
                 true_size = np.std(np.linalg.norm(coords_class[clabels == cluster_id] - true_centroids[j], axis=1))
                 row = (index, c, ari, purity, efficiency, fscore, \
-                    nclusters, s_thresholds[int(c)], p_thresholds[int(c)], margin, true_size)
+                    true_num_clusters, cluster_count, s_thresholds[int(c)], p_thresholds[int(c)], margin, true_size)
                 output.append(row)
             print("ARI = ", ari)
 
     output = pd.DataFrame(output, columns=['Index', 'Class', 'ARI',
-                'Purity', 'Efficiency', 'FScore', 'num_clusters', 
+                'Purity', 'Efficiency', 'FScore', 'true_num_clusters', 'pred_num_clusters',
                 'seed_threshold', 'prob_threshold', 'margin', 'true_size'])
     return output
 
@@ -250,15 +272,17 @@ if __name__ == "__main__":
     cfg = yaml.load(open(args['test_config'], 'r'), Loader=yaml.Loader)
 
     train_cfg = cfg['config_path']
-    s_thresholds = [0.0]
-    p_thresholds = [0.5]
+    s_thresholds = np.linspace(0, 0.95, 20)
+    p_thresholds = np.linspace(0, 0.6, 20)
+    # s_thresholds = [0.0]
+    # p_thresholds = [0.5]
     for p in p_thresholds:
         for t in s_thresholds:
             start = time.time()
             output = main_loop(train_cfg, s_threshold=t, p_threshold=p, **cfg)
             end = time.time()
             print("Time = {}".format(end - start))
-            name = '{}.csv'.format(cfg['name'])
+            name = '{}_{}_{}.csv'.format(cfg['name'], p, t)
             if not os.path.exists(cfg['target']):
                 os.mkdir(cfg['target'])
             target = os.path.join(cfg['target'], name)

@@ -384,7 +384,7 @@ class MaskLovaszInterLoss(MaskLovaszHingeLoss):
             mask[~index] = 0
             sigma = torch.mean(margins[index], dim=0)
             dists = torch.sum(torch.pow(embeddings - centroids[i], 2), dim=1)
-            p = torch.exp(-dists / (2 * torch.pow(sigma, 2)))
+            p = torch.exp(-dists / (2 * torch.pow(sigma, 2) + 1e-6))
             probs[index] = p[index]
             loss += lovasz_hinge_flat(2 * p - 1, mask)
             accuracy += iou_binary(p > 0.5, mask, per_image=False)
