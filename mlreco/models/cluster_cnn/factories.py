@@ -52,7 +52,9 @@ def clustering_loss_dict():
         'se_multi_entropy': spatial_embeddings.MultiVariateEntropy,
         'se_ce_dice': spatial_embeddings.CEDiceLoss,
         'se_ce_f1': spatial_embeddings.CEF1Loss,
-        'se_ce_lovasz': spatial_embeddings.CELovaszLoss
+        'se_ce_lovasz': spatial_embeddings.CELovaszLoss,
+        'se_offset_lovasz': spatial_embeddings.OffsetLovasz
+        # 'se_multi_layer': spatial_embeddings.MultiLayerLovasz
     }
     return loss
 

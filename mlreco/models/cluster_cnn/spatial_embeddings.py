@@ -123,7 +123,8 @@ class SpatialEmbeddings1(UResNet):
         res = {
             "embeddings": [embeddings[:, :self.dimension]],
             "margins": [margins],
-            "seediness": [self.sigmoid(seediness)]
+            "seediness": [self.sigmoid(seediness)],
+            "features_cluster": [features_cluster]
         }
         # print(res)
 
