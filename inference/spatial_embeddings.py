@@ -28,26 +28,26 @@ def make_inference_cfg(train_cfg, gpu=1, snapshot=None, batch_size=1, model_path
     process_config(cfg)
     inference_cfg = cfg.copy()
     data_keys = inference_cfg['iotool']['dataset']['data_keys']
-    
+
     # Change dataset to validation samples
     data_val = []
     for file_path in data_keys:
         data_val.append(file_path.replace('train', 'test'))
     inference_cfg['iotool']['dataset']['data_keys'] = data_val
-    
+
     # Change batch size to 1 since no need for batching during validation
     inference_cfg['iotool']['batch_size'] = batch_size
     inference_cfg['iotool'].pop('sampler', None)
     inference_cfg['iotool'].pop('minibatch_size', None)
     inference_cfg['trainval']['gpus'] = str(gpu)
     inference_cfg['trainval']["train"] = False
-    
+
     # Analysis keys for clustering
     inference_cfg['model']["analysis_keys"] = {
         "segmentation": 0,
         "clustering": 1,
     }
-    
+
     # Get latest model path if checkpoint not provided.
     if model_path is None:
         model_path = inference_cfg['trainval']['model_path']
@@ -145,7 +145,7 @@ def fit_predict1(embeddings, seediness, margins, threshold=0.9, cluster_all=Fals
     return pred_labels, spheres
 
 
-def fit_predict2(embeddings, seediness, margins, fitfunc, 
+def fit_predict2(embeddings, seediness, margins, fitfunc,
                  s_threshold=0.0, p_threshold=0.5, cluster_all=False):
     pred_labels = -np.ones(embeddings.shape[0])
     probs = []
@@ -224,6 +224,7 @@ def main_loop(train_cfg, **kwargs):
             purity, efficiency = purity_efficiency(pred, clabels)
             fscore = 2 * (purity * efficiency) / (purity + efficiency)
             ari = ARI(pred, clabels)
+            sbd = SBD(pred, clabels)
             nclusters = len(np.unique(clabels))
             _, true_centroids = find_cluster_means(coords_class, clabels)
             for j, cluster_id in enumerate(np.unique(clabels)):
@@ -235,7 +236,7 @@ def main_loop(train_cfg, **kwargs):
             print("ARI = ", ari)
 
     output = pd.DataFrame(output, columns=['Index', 'Class', 'ARI',
-                'Purity', 'Efficiency', 'FScore', 'num_clusters', 
+                'Purity', 'Efficiency', 'FScore', 'SBD', 'num_clusters',
                 'seed_threshold', 'prob_threshold', 'margin', 'true_size'])
     return output
 
