@@ -210,10 +210,10 @@ def main_loop(train_cfg, **kwargs):
     iterations = inference_cfg['trainval']['iterations']
     s_threshold = kwargs['s_threshold']
     p_threshold = kwargs['p_threshold']
-    # s_thresholds = {0: 0.88, 1: 0.92, 2: 0.84, 3: 0.84, 4: 0.8}
-    # p_thresholds = {0: 0.5, 1: 0.5, 2: 0.5, 3: 0.5, 4: 0.5}
-    s_thresholds = { key : s_threshold for key in range(5)}
-    p_thresholds = { key : p_threshold for key in range(5)}
+    s_thresholds = {0: 0.88, 1: 0.92, 2: 0.84, 3: 0.84, 4: 0.8}
+    p_thresholds = {0: 0.5, 1: 0.5, 2: 0.5, 3: 0.5, 4: 0.5}
+    # s_thresholds = { key : s_threshold for key in range(5)}
+    # p_thresholds = { key : p_threshold for key in range(5)}
 
     for i in event_list:
 
@@ -246,18 +246,19 @@ def main_loop(train_cfg, **kwargs):
             purity, efficiency = purity_efficiency(pred, clabels)
             fscore = 2 * (purity * efficiency) / (purity + efficiency)
             ari = ARI(pred, clabels)
+            sbd = SBD(pred, clabels)
             true_num_clusters = len(np.unique(clabels))
             _, true_centroids = find_cluster_means(coords_class, clabels)
             for j, cluster_id in enumerate(np.unique(clabels)):
                 margin = np.mean(margins_class[clabels == cluster_id])
                 true_size = np.std(np.linalg.norm(coords_class[clabels == cluster_id] - true_centroids[j], axis=1))
-                row = (index, c, ari, purity, efficiency, fscore, \
+                row = (index, c, ari, purity, efficiency, fscore, sbd, \
                     true_num_clusters, cluster_count, s_thresholds[int(c)], p_thresholds[int(c)], margin, true_size)
                 output.append(row)
             print("ARI = ", ari)
 
     output = pd.DataFrame(output, columns=['Index', 'Class', 'ARI',
-                'Purity', 'Efficiency', 'FScore', 'true_num_clusters', 'pred_num_clusters',
+                'Purity', 'Efficiency', 'FScore', 'SBD', 'true_num_clusters', 'pred_num_clusters',
                 'seed_threshold', 'prob_threshold', 'margin', 'true_size'])
     return output
 
@@ -272,14 +273,11 @@ if __name__ == "__main__":
     cfg = yaml.load(open(args['test_config'], 'r'), Loader=yaml.Loader)
 
     train_cfg = cfg['config_path']
-    s_thresholds = np.linspace(0, 0.95, 20)
-    p_thresholds = np.linspace(0, 0.6, 20)
-    # s_thresholds = [0.0]
-    # p_thresholds = [0.5]
+
     for p in p_thresholds:
         for t in s_thresholds:
             start = time.time()
-            output = main_loop(train_cfg, s_threshold=t, p_threshold=p, **cfg)
+            output = main_loop(train_cfg, *cfg)
             end = time.time()
             print("Time = {}".format(end - start))
             name = '{}_{}_{}.csv'.format(cfg['name'], p, t)
