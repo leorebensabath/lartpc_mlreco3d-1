@@ -247,19 +247,6 @@ class SpatialEmbeddings3(SpatialEmbeddings1):
         super(SpatialEmbeddings3, self).__init__(cfg, name=name)
         self.embedding_dim = self.model_config.get('embedding_dim', 4)
         self.coordConv = self.model_config.get('coordConv', True)
-        # Define outputlayers
-        self.outputEmbeddings = scn.Sequential()
-        self._resnet_block(self.outputEmbeddings, self.num_filters, self.embedding_dim)
-        self.outputEmbeddings.add(scn.OutputLayer(self.dimension))
-        # Seediness Output
-        self.outputSeediness = scn.Sequential()
-        self._resnet_block(self.outputSeediness, self.num_filters, self.seedDim)
-        self.outputSeediness.add(scn.OutputLayer(self.dimension))
-        # Margin Output
-        self.outputMargins = scn.Sequential()
-        self._resnet_block(self.outputMargins, self.num_filters, self.sigmaDim)
-        self.outputMargins.add(scn.OutputLayer(self.dimension))
-
 
     def forward(self, input):
         '''
@@ -287,16 +274,27 @@ class SpatialEmbeddings3(SpatialEmbeddings1):
         features_cluster = self.decoder(features_enc, deepest_layer)
         features_seediness = self.seed_decoder(features_enc, deepest_layer)
 
+        normalized_coords = (coords[:, :3] - self.spatial_size / 2) \
+            / (self.spatial_size / 2)
+
         embeddings = self.outputEmbeddings(features_cluster[-1])
-        margins = self.outputMargins(features_cluster[-1])
+        embeddings[:, :self.dimension] = self.tanh(embeddings[:, :self.dimension])
+        embeddings[:, :self.dimension] += normalized_coords
+        sigma = 2 * self.sigmoid(embeddings[:, self.dimension:self.dimension+3])
+        l = embeddings[:, self.dimension+3:]
+        margins = torch.cat([sigma, l], dim=1)
+        # embeddings[:, self.dimension:self.dimension+3] = \
+        #     self.softplus(embeddings[:, self.dimension:self.dimension+3])
+        # embeddings[:, self.dimension+3:] = \
+        #     self.tanhshrink(embeddings[:, self.dimension+3:])
         seediness = self.outputSeediness(features_seediness[-1])
 
         res = {
-            "embeddings": [self.tanh(embeddings)],
-            "margins": [self.sigmoid(margins)],
-            "seediness": [self.sigmoid(seediness)]
+            "embeddings": [embeddings[:, :self.dimension]],
+            "margins": [margins],
+            "seediness": [self.sigmoid(seediness)],
+            "features_cluster": [features_cluster]
         }
-
-        print(res)
+        # print(res)
 
         return res
