@@ -5,27 +5,31 @@ from torch.autograd import Variable
 import numpy as np
 import sparseconvnet as scn
 
+# All kernel functions should produce values between [0,1], where
+# similar features have kernel values closer to 1.
 
-def gauss(centroid, sigma, eps=1e-8):
+
+def gauss(centroid, sigma=1, eps=1e-8):
     def f(x):
         dists = torch.sum(torch.pow(x - centroid, 2), dim=1)
-        p = torch.clamp(torch.exp(-dists / (2 * torch.pow(sigma, 2))), min=0, max=1)
-        return probs
+        print(dists)
+        p = torch.exp(-dists / (2 * (sigma**2) + eps))
+        return p
     return f
 
-def rational_quadratic(centroid, sigma=1, eps=1e-8):
+def rational_quadratic(centroid, alpha=1, eps=1e-8):
     def f(x):
         dists = torch.sum(torch.pow(x - centroid, 2), dim=1)
-        p = torch.clamp(torch.pow(1.0 + dists / (2 * sigma), -sigma), min=0, max=1)
-        return probs
+        p = torch.pow(1.0 + dists / (2 * alpha), -alpha)
+        return p
     return f
 
 def cosine_similarity(centroid, eps=1e-8):
     def f(x):
-        dists = F.cosine_similarity(x, centroid, dim=1)
+        cent = centroid.expand_as(x)
+        dists = F.cosine_similarity(x, cent, dim=1)
         return (1.0 + dists) / 2
     return f
-
 
 def multi_gauss(centroid, sigma, Lprime, eps=1e-8):
     def f(x):

@@ -35,7 +35,7 @@ def clustering_loss_dict():
     '''
     Returns dictionary of various clustering losses with enhancements.
     '''
-    from .losses import multi_layers, single_layers, spatial_embeddings
+    from .losses import multi_layers, single_layers, spatial_embeddings, spherical_embeddings
     loss = {
         'single': single_layers.DiscriminativeLoss,
         'multi': multi_layers.MultiScaleLoss,
@@ -53,7 +53,8 @@ def clustering_loss_dict():
         'se_ce_dice': spatial_embeddings.CEDiceLoss,
         'se_ce_f1': spatial_embeddings.CEF1Loss,
         'se_ce_lovasz': spatial_embeddings.CELovaszLoss,
-        'se_offset_lovasz': spatial_embeddings.OffsetLovasz
+        'se_offset_lovasz': spatial_embeddings.OffsetLovasz,
+        'se_multi_layer_1': spherical_embeddings.MaskEmbeddingLoss
         # 'se_multi_layer': spatial_embeddings.MultiLayerLovasz
     }
     return loss
