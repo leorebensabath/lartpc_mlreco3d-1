@@ -9,6 +9,7 @@ from .lovasz import mean, lovasz_hinge_flat, StableBCELoss, iou_binary
 from .misc import FocalLoss, WeightedFocalLoss, SoftF1Loss, SoftDiceLoss
 from .kernels import *
 from collections import defaultdict
+from mlreco.utils.metrics import ARI
 import pprint
 
 
@@ -25,7 +26,7 @@ class MaskEmbeddingLoss(nn.Module):
         self.smoothing_weight = self.loss_config.get('smoothing_weight', 1.0)
         self.spatial_size = self.loss_config.get('spatial_size', 512)
 
-        self.kernel = self.loss_config.get('kernel', 'cosine')
+        self.kernel = self.loss_config.get('kernel', 'gauss')
         if self.kernel == 'cosine':
             self.kernel = cosine_similarity
         elif self.kernel == 'rational':
@@ -84,12 +85,14 @@ class MaskEmbeddingLoss(nn.Module):
         if n_clusters < 2:
             # Inter-cluster loss is zero if there only one instance exists for
             # a semantic label.
-            return 0.0
+            return torch.Tensor([0.0]).cuda()
         else:
             for i, c1 in enumerate(cluster_means):
                 for j, c2 in enumerate(cluster_means):
                     if i != j:
                         kernel = self.kernel(c1)
+                        if len(c2.shape) == 1:
+                            c2 = c2.unsqueeze(0)
                         dist = torch.clamp(kernel(c2) - margin, min=0)
                         inter_loss += dist
             inter_loss /= float((n_clusters - 1) * n_clusters)
@@ -105,19 +108,26 @@ class MaskEmbeddingLoss(nn.Module):
         centroids = self.find_cluster_means(embeddings, labels)
         n_clusters = len(centroids)
         cluster_labels = labels.unique(sorted=True)
-        inter_loss = self.inter_cluster_loss(centroids, margin=self.inter_magin)
+        inter_loss = self.inter_cluster_loss(centroids, margin=self.inter_margin)
 
         for i, c in enumerate(cluster_labels):
             index = labels == c
             kernel = self.kernel(centroids[i])
-            ally_dist = kernel(embeddings[index])
-            ally_loss += torch.clamp(self.ally_margin - ally_dist, min=0)
+            allies = embeddings[index]
+            if len(allies.shape) == 1:
+                allies = allies.unsqueeze(0)
+            ally_dist = kernel(allies)
+            ally_loss += torch.mean(torch.clamp(self.ally_margin - ally_dist, min=0))
             if index.all():
                 continue
-            enemy_dist = kernel(embeddings[~index])
-            enemy_loss += torch.clamp(enemy_dist - self.enemy_margin, min=0)
+            enemies = embeddings[~index]
+            if len(enemies.shape) == 1:
+                enemies = enemies.unsqueeze(0)
+            enemy_dist = kernel(enemies)
+            enemy_loss += torch.mean(torch.clamp(enemy_dist - self.enemy_margin, min=0))
+
         loss = self.ally_weight * ally_loss + self.enemy_weight * enemy_loss
-        loss += self.inter_weight * inter_loss
+        loss += self.inter_weight * inter_loss.squeeze()
         return loss
 
 
@@ -137,7 +147,7 @@ class MaskEmbeddingLoss(nn.Module):
         return reg_loss
 
 
-    def compute_mask_loss(self, embeddings, margins, labels, coords):
+    def compute_mask_loss(self, embeddings, margins, labels):
         '''
         Computes binary foreground/background loss.
         '''
@@ -148,6 +158,7 @@ class MaskEmbeddingLoss(nn.Module):
         n_clusters = len(centroids)
         cluster_labels = labels.unique(sorted=True)
         probs = torch.zeros(embeddings.shape[0]).float().cuda()
+        prob_map = []
         acc = 0.0
 
         for i, c in enumerate(cluster_labels):
@@ -156,23 +167,26 @@ class MaskEmbeddingLoss(nn.Module):
             mask[index] = 1.0
             mask[~index] = 0.0
             sigma = torch.mean(margins[index], dim=0)
-            kernel = gauss(centroids[i], sigma=sigma)
-            p = kernel(embeddings)
+            dists = torch.sum(torch.pow(embeddings - centroids[i], 2), dim=1)
+            p = torch.clamp(torch.exp(-dists / (2 * torch.pow(sigma, 2))), min=0, max=1)
             probs[index] = p[index]
-            loss += lovasz_hinge_flat(p, mask)
-            acc += iou_binary(p > 0.5, mask)
+            prob_map.append(p.view(-1, 1))
+            loss += lovasz_hinge_flat(2 * p - 1, mask)
+            acc += iou_binary(p > 0.5, mask, per_image=False)
             sigma_detach = sigma.detach()
-            smoothing_loss += torch.sum(torch.pow(margins[index] - sigma_detach, 2))
+            smoothing_loss += torch.mean(torch.norm(margins[index] - sigma_detach, dim=1))
 
         loss /= n_clusters
         smoothing_loss /= n_clusters
         acc /= n_clusters
-        loss += reg_loss
+        loss += 0.0001 * reg_loss
+        # prob_map = torch.cat(prob_map, dim=1)
+        # pred = torch.argmax(prob_map, dim=1)
 
         return loss, smoothing_loss, probs, acc
 
 
-    def mask_loss_class(self, embeddings, margins, seediness, slabels, clabels, coords):
+    def mask_loss_class(self, embeddings, margins, seediness, slabels, clabels):
         '''
         Wrapper function for combining different components of the loss,
         in particular when clustering must be done PER SEMANTIC CLASS.
@@ -197,8 +211,10 @@ class MaskEmbeddingLoss(nn.Module):
         for sc in semantic_classes:
             index = (slabels == sc)
             mask_loss, smoothing_loss, probs, acc = self.compute_mask_loss(
-                embeddings[index], margins[index], clabels[index], coords[index])
+                embeddings[index], margins[index], clabels[index])
+            # acc = ARI(pred.detach().cpu().numpy(), clabels[index].detach().cpu().numpy())
             prob_truth = probs.detach()
+            prob_truth[prob_truth < 0.5] = 0
             seed_loss = self.l1loss(prob_truth, seediness[index].squeeze(1))
             total_loss = self.embedding_weight * mask_loss \
                        + self.seediness_weight * seed_loss \
@@ -239,28 +255,47 @@ class MaskEmbeddingLoss(nn.Module):
         for i_gpu in range(num_gpus):
             slabels = segment_labels[i_gpu]
             clabels = group_labels[i_gpu]
-            print(slabels)
-            print(clabels)
-            assert False
-            slabels = slabels.int()
-            clabels = group_label[i][:, -2]
-            batch_idx = segment_label[i][:, 3]
-            embedding = out['embeddings'][i]
-            seediness = out['seediness'][i]
-            margins = out['margins'][i]
-            nbatch = batch_idx.unique().shape[0]
+            features_cluster = out['features_cluster'][i_gpu]
+            embeddings = out['embeddings'][i_gpu]
+            margins = out['margins'][i_gpu]
+            seediness = out['seediness'][i_gpu]
+            coords = out['coords'][i_gpu]
 
-            for bidx in batch_idx.unique(sorted=True):
-                embedding_batch = embedding[batch_idx == bidx]
-                slabels_batch = slabels[batch_idx == bidx]
-                clabels_batch = clabels[batch_idx == bidx]
-                seed_batch = seediness[batch_idx == bidx]
-                margins_batch = margins[batch_idx == bidx]
-                coords_batch = coords[batch_idx == bidx] / self.spatial_size
+            # First compute layerwise embedding loss
+            # embedding_loss = []
+            # for i, fc in enumerate(features_cluster[::-1]):
+            #     coords_layer = fc.get_spatial_locations().detach().cpu().numpy()
+            #     perm = np.lexsort((coords_layer[:, 2], coords_layer[:, 1], coords_layer[:, 0], coords_layer[:, 3]))
+            #     coords_layer = coords_layer[perm]
+            #     feature_layer = fc.features[perm]
+            #     batch_idx = slabels[i][:, 3]
+            #     loss_batch = []
+            #     for bidx in batch_idx.unique():
+            #         batch_index = batch_idx == bidx
+            #         feature_batch = feature_layer[batch_index]
+            #         slabel_batch = slabels[i][batch_index][:, -1]
+            #         clabel_batch = clabels[i][batch_index][:, -2]
+            #         embedding_layer_loss = self.embedding_loss_class(
+            #             feature_batch, slabel_batch, clabel_batch)
+            #         loss_batch.append(embedding_layer_loss)
+            #     embedding_loss_batch = sum(loss_batch) / len(loss_batch)
+            #     embedding_loss.append(embedding_loss_batch)
+            # embedding_loss = sum(embedding_loss) / len(embedding_loss)
+            # loss['embedding_loss'].append(embedding_loss)
 
-                loss_class, acc_class = self.combine_multiclass(
+            # Now compute mask and seed loss at final layer
+            batch_idx = slabels[0][:, 3]
+            for bidx in batch_idx.unique():
+                index = batch_idx == bidx
+                embedding_batch = embeddings[index]
+                slabels_batch = slabels[0][:, -1][index]
+                clabels_batch = clabels[0][:, -2][index]
+                seed_batch = seediness[index]
+                margins_batch = margins[index]
+
+                loss_class, acc_class = self.mask_loss_class(
                     embedding_batch, margins_batch,
-                    seed_batch, slabels_batch, clabels_batch, coords_batch)
+                    seed_batch, slabels_batch, clabels_batch)
                 for key, val in loss_class.items():
                     loss[key].append(sum(val) / len(val))
                 for s, acc in acc_class.items():
@@ -279,6 +314,49 @@ class MaskEmbeddingLoss(nn.Module):
         res = {}
         res.update(loss_avg)
         res.update(acc_avg)
+        # res['loss'] += res['embedding_loss']
         # pprint.pprint(res)
 
         return res
+
+
+class MaskEmbeddingLoss2(MaskEmbeddingLoss):
+
+    def __init__(self, cfg, name='clustering_loss'):
+        super(MaskEmbeddingLoss2, self).__init__(cfg)
+
+    def compute_mask_loss(self, embeddings, margins, labels):
+        '''
+        Computes binary foreground/background loss.
+        '''
+        loss = 0.0
+        smoothing_loss = 0.0
+        centroids = self.find_cluster_means(embeddings, labels)
+        reg_loss = self.regularization(centroids)
+        n_clusters = len(centroids)
+        cluster_labels = labels.unique(sorted=True)
+        probs = torch.zeros(embeddings.shape[0]).float().cuda()
+        prob_map = []
+        acc = 0.0
+
+        for i, c in enumerate(cluster_labels):
+            index = (labels == c)
+            mask = torch.zeros(embeddings.shape[0]).cuda()
+            mask[index] = 1.0
+            mask[~index] = 0.0
+            sigma = torch.mean(margins[index], dim=0)
+            kernel = cosine_similarity(centroids[i])
+            p = kernel(embeddings)
+            probs[index] = p[index]
+            prob_map.append(p.view(-1, 1))
+            loss += lovasz_hinge_flat(2.0 * p - 1, mask)
+            sigma_detach = sigma.detach()
+            smoothing_loss += torch.mean(torch.norm(margins[index] - sigma_detach, dim=1))
+
+        loss /= n_clusters
+        smoothing_loss /= n_clusters
+        acc /= n_clusters
+        # prob_map = torch.cat(prob_map, dim=1)
+        # pred = torch.argmax(prob_map, dim=1)
+
+        return loss, smoothing_loss, probs, acc

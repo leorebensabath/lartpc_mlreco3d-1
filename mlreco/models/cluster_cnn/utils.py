@@ -14,7 +14,7 @@ def add_normalized_coordinates(input):
         attach normalized coordinates with range (-1, 1)
 
     RETURNS:
-        - output (scn.SparseConvNetTensor): sparse tensor with 
+        - output (scn.SparseConvNetTensor): sparse tensor with
         normalized coordinate concatenated to first three dimensions.
     '''
     output = scn.SparseConvNetTensor()
@@ -33,9 +33,9 @@ def add_normalized_coordinates(input):
 def distance_matrix(points):
     """
     Uses BLAS/LAPACK operations to efficiently compute pairwise distances.
-    
+
     INPUTS:
-        - points (N x d Tensor): torch.Tensor with each row 
+        - points (N x d Tensor): torch.Tensor with each row
         corresponding to a point in vector space.
 
     RETURNS:

@@ -12,7 +12,6 @@ import sparseconvnet as scn
 def gauss(centroid, sigma=1, eps=1e-8):
     def f(x):
         dists = torch.sum(torch.pow(x - centroid, 2), dim=1)
-        print(dists)
         p = torch.exp(-dists / (2 * (sigma**2) + eps))
         return p
     return f
@@ -27,7 +26,7 @@ def rational_quadratic(centroid, alpha=1, eps=1e-8):
 def cosine_similarity(centroid, eps=1e-8):
     def f(x):
         cent = centroid.expand_as(x)
-        dists = F.cosine_similarity(x, cent, dim=1)
+        dists = F.cosine_similarity(x, cent)
         return (1.0 + dists) / 2
     return f
 

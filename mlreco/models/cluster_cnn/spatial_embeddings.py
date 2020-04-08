@@ -245,7 +245,7 @@ class SpatialEmbeddings3(SpatialEmbeddings1):
 
     def __init__(self, cfg, name='spatial_embeddings'):
         super(SpatialEmbeddings3, self).__init__(cfg, name=name)
-        self.embedding_dim = self.model_config.get('embedding_dim', 4)
+        self.embedding_dim = self.model_config.get('embedding_dim', 3)
         self.coordConv = self.model_config.get('coordConv', True)
 
     def forward(self, input):
@@ -260,10 +260,15 @@ class SpatialEmbeddings3(SpatialEmbeddings1):
             - feature_dec: decoder features at each spatial resolution.
         '''
         point_cloud, = input
-        coords = point_cloud[:, 0:self.dimension+1].float()
+        coords = point_cloud[:, 0:self.dimension+1]
+        coords_temp = coords.detach().cpu().numpy()
+        perm = np.lexsort((coords_temp[:, 2], coords_temp[:, 1],
+                           coords_temp[:, 0], coords_temp[:, 3]))
+        coords = coords[perm].float()
         normalized_coords = (coords[:, :3] - float(self.spatial_size) / 2) \
                     / (float(self.spatial_size) / 2)
         features = point_cloud[:, self.dimension+1:].float()
+        features = features[perm]
         if self.coordConv:
             features = torch.cat([normalized_coords, features], dim=1)
 
@@ -276,13 +281,10 @@ class SpatialEmbeddings3(SpatialEmbeddings1):
 
         normalized_coords = (coords[:, :3] - self.spatial_size / 2) \
             / (self.spatial_size / 2)
-
         embeddings = self.outputEmbeddings(features_cluster[-1])
-        embeddings[:, :self.dimension] = self.tanh(embeddings[:, :self.dimension])
-        embeddings[:, :self.dimension] += normalized_coords
-        sigma = 2 * self.sigmoid(embeddings[:, self.dimension:self.dimension+3])
-        l = embeddings[:, self.dimension+3:]
-        margins = torch.cat([sigma, l], dim=1)
+        # embeddings[:, :self.embedding_dim] = self.tanh(embeddings[:, :self.embedding_dim])
+        margins = 2 * self.sigmoid(
+            embeddings[:, self.embedding_dim:self.embedding_dim+self.sigmaDim])
         # embeddings[:, self.dimension:self.dimension+3] = \
         #     self.softplus(embeddings[:, self.dimension:self.dimension+3])
         # embeddings[:, self.dimension+3:] = \
@@ -293,7 +295,8 @@ class SpatialEmbeddings3(SpatialEmbeddings1):
             "embeddings": [embeddings[:, :self.dimension]],
             "margins": [margins],
             "seediness": [self.sigmoid(seediness)],
-            "features_cluster": [features_cluster]
+            "features_cluster": [features_cluster],
+            "coords": [coords]
         }
         # print(res)
 
