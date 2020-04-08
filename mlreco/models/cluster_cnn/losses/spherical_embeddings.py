@@ -332,7 +332,7 @@ class MaskEmbeddingLoss2(MaskEmbeddingLoss):
         loss = 0.0
         smoothing_loss = 0.0
         centroids = self.find_cluster_means(embeddings, labels)
-        reg_loss = self.regularization(centroids)
+        centroids = centroids / torch.norm(centroids, dim=1, keepdim=True)
         n_clusters = len(centroids)
         cluster_labels = labels.unique(sorted=True)
         probs = torch.zeros(embeddings.shape[0]).float().cuda()
@@ -345,8 +345,9 @@ class MaskEmbeddingLoss2(MaskEmbeddingLoss):
             mask[index] = 1.0
             mask[~index] = 0.0
             sigma = torch.mean(margins[index], dim=0)
-            kernel = cosine_similarity(centroids[i])
-            p = kernel(embeddings)
+            dists = torch.sum(torch.pow(embeddings - centroids[i], 2), dim=1)
+            p = torch.clamp(torch.exp(-dists / (2 * torch.pow(sigma, 2))), min=0, max=1)
+            acc += iou_binary(p > 0.5, mask, per_image=False)
             probs[index] = p[index]
             prob_map.append(p.view(-1, 1))
             loss += lovasz_hinge_flat(2.0 * p - 1, mask)

@@ -3,7 +3,7 @@ import torch.nn as nn
 import numpy as np
 import sparseconvnet as scn
 
-from .cluster_cnn.spatial_embeddings import SpatialEmbeddings1, SpatialEmbeddings2, SpatialEmbeddings3
+from .cluster_cnn.spatial_embeddings import SpatialEmbeddings1, SpatialEmbeddings2, SpatialEmbeddings3, SpatialEmbeddings4
 from .cluster_cnn.losses.spatial_embeddings import *
 from .cluster_cnn import cluster_model_construct, backbone_construct, clustering_loss_construct
 
@@ -37,6 +37,12 @@ class ClusterCNN3(SpatialEmbeddings3):
 
     def __init__(self, cfg):
         super(ClusterCNN3, self).__init__(cfg)
+
+
+class ClusterCNN4(SpatialEmbeddings4):
+
+    def __init__(self, cfg):
+        super(ClusterCNN4, self).__init__(cfg)
 
 
 class ClusteringLoss(nn.Module):

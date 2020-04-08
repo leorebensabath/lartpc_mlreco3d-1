@@ -53,8 +53,9 @@ class ConvAutoEncoder(NetworkBase):
         for i in range(self.num_strides-2, -1, -1):
             m = scn.Sequential().add(
                 scn.BatchNormLeakyReLU(self.nPlanes[i+1], leakiness=self.leakiness)).add(
-                scn.Deconvolution(self.dimension, self.nPlanes[i+1], self.nPlanes[i],
-                    self.downsample[0], self.downsample[1], self.allow_bias))
+                scn.TransposeConvolution(self.dimension, self.nPlanes[i+1], self.nPlanes[i],
+                    self.downsample[0], self.downsample[1], self.allow_bias)).add(
+                scn.SparsifyFCS(self.dimension))
             self.decoding_blocks.add(m)
             m = scn.Sequential()
             for j in range(self.reps):
@@ -63,8 +64,10 @@ class ConvAutoEncoder(NetworkBase):
 
         self.pool = scn.Convolution(self.dimension, self.nPlanes[-1], self.nPlanes[-1],
             self.final_size, self.final_size, self.allow_bias)
-        self.unpool = scn.Deconvolution(self.dimension, self.nPlanes[-1], self.nPlanes[-1],
-            self.final_size, self.final_size, self.allow_bias)
+        self.unpool = scn.Sequential().add(
+            scn.TransposeConvolution(self.dimension, self.nPlanes[-1], self.nPlanes[-1],
+                    self.final_size, self.final_size, self.allow_bias)).add(
+            scn.SparsifyFCS(self.dimension))
         self.output = scn.Sequential().add(
             scn.NetworkInNetwork(self.nPlanes[0], 1, self.allow_bias)).add(
             scn.OutputLayer(self.dimension))

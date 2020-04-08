@@ -55,7 +55,10 @@ def model_dict():
         "clusternet": (clusternet.ClusterCNN, clusternet.ClusteringLoss),
         # Spatial Embeddings
         "spatial_embeddings": (clustercnn_se.ClusterCNN, clustercnn_se.ClusteringLoss),
-        "spatial_embeddings_2": (clustercnn_se.ClusterCNN3, clustercnn_se.ClusteringLoss)
+        "spatial_embeddings_2": (clustercnn_se.ClusterCNN3, clustercnn_se.ClusteringLoss),
+        "spatial_embeddings_spherical": (clustercnn_se.ClusterCNN4, clustercnn_se.ClusteringLoss),
+        # Autoencoders
+        "conv_autoencoder": (autoencoders.AutoEncoder, autoencoders.AutoEncoderLoss)
     }
     # "chain_gnn": (chain_gnn.Chain, chain_gnn.ChainLoss)
     return models
