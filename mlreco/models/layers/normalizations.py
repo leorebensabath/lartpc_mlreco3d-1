@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import torch.nn.init as init
 import sparseconvnet as scn
 
+
 class _Normalization(nn.Module):
     '''
     Abstract Base Class for normalization layers.
@@ -31,7 +32,7 @@ class _Normalization(nn.Module):
         if self.track_running_stats:
             self.register_buffer('running_mean', torch.zeros(num_features))
             self.register_buffer('running_var', torch.ones(num_features))
-            self.register_buffer('num_batches_tracked', 
+            self.register_buffer('num_batches_tracked',
                 torch.tensor(0, dtype=torch.long))
         else:
             self.register_parameter('running_mean', None)
@@ -51,7 +52,6 @@ class _Normalization(nn.Module):
             init.ones_(self.weight)
             init.zeros_(self.bias)
 
-
 class InstanceNormLeakyReLU(_Normalization):
     '''
     Instance Normalization Layer for Sparse Tensors.
@@ -64,7 +64,7 @@ class InstanceNormLeakyReLU(_Normalization):
 
     INPUTS:
         - x (scn.SparseConvnetTensor)
-    
+
     RETURNS:
         - out (scn.SparseConvnetTensor)
     '''
@@ -93,7 +93,7 @@ class GroupNormLeakyReLU(_Normalization):
     References:
         - Pytorch BatchNorm Implementation:
 
-        - Group Norm Paper: 
+        - Group Norm Paper:
 
     INPUTS:
         - x (scn.SparseConvnetTensor)

@@ -23,6 +23,7 @@ class SpatialEmbeddings1(UResNet):
         self.embedding_dim = self.model_config.get('embedding_dim', 3)
         self.sigmaDim = self.model_config.get('sigma_dim', 1)
         self.seed_freeze = self.model_config.get('seed_freeze', False)
+        self.coordConv = self.model_config.get('coordConv', False)
         # Define Separate Sparse UResNet Decoder for seediness.
         self.decoding_block2 = scn.Sequential()
         self.decoding_conv2 = scn.Sequential()
@@ -56,9 +57,7 @@ class SpatialEmbeddings1(UResNet):
 
         # Pytorch Activations
         self.tanh = nn.Tanh()
-        self.tanhshrink = nn.Tanhshrink()
         self.sigmoid = nn.Sigmoid()
-        self.softplus = nn.Softplus()
 
 
     def seed_decoder(self, features_enc, deepest_layer):
@@ -94,10 +93,18 @@ class SpatialEmbeddings1(UResNet):
             - feature_enc: encoder features at each spatial resolution.
             - feature_dec: decoder features at each spatial resolution.
         '''
+        # point_cloud, = input
+        # coords = point_cloud[:, 0:self.dimension+1].float()
+        # features = point_cloud[:, self.dimension+1:].float()
+        # features = features[:, -1].view(-1, 1)
         point_cloud, = input
-        coords = point_cloud[:, 0:self.dimension+1].float()
+        coords = point_cloud[:, 0:self.dimension+1]
+        normalized_coords = (coords[:, :3] - float(self.spatial_size) / 2) \
+                    / (float(self.spatial_size) / 2)
+        normalized_coords = normalized_coords.float()
         features = point_cloud[:, self.dimension+1:].float()
-        features = features[:, -1].view(-1, 1)
+        if self.coordConv:
+            features = torch.cat([normalized_coords, features], dim=1)
 
         x = self.input((coords, features))
         encoder_res = self.encoder(x)
@@ -106,8 +113,8 @@ class SpatialEmbeddings1(UResNet):
         features_cluster = self.decoder(features_enc, deepest_layer)
         features_seediness = self.seed_decoder(features_enc, deepest_layer)
 
-        normalized_coords = (coords[:, :3] - self.spatial_size / 2) \
-            / (self.spatial_size / 2)
+        # normalized_coords = (coords[:, :3] - self.spatial_size / 2) \
+        #     / (self.spatial_size / 2)
 
         embeddings = self.outputEmbeddings(features_cluster[-1])
         embeddings[:, :self.dimension] = self.tanh(embeddings[:, :self.dimension])
