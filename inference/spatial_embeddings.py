@@ -8,6 +8,7 @@ import time
 from scipy.spatial.distance import cdist
 from scipy.spatial.kdtree import KDTree
 from sklearn.metrics import adjusted_rand_score as ari
+from sklearn.cluster import DBSCAN
 from pathlib import Path
 import argparse
 
@@ -155,7 +156,6 @@ def fit_predict2(embeddings, seediness, margins, fitfunc,
     while count < seediness.shape[0]:
         i = np.argsort(seediness_copy)[::-1][0]
         seedScore = seediness[i]
-#         print(seedScore)
         if seedScore < s_threshold:
             break
         centroid = embeddings[i]
@@ -163,10 +163,8 @@ def fit_predict2(embeddings, seediness, margins, fitfunc,
         spheres.append((centroid, sigma))
         f = fitfunc(centroid, sigma)
         pValues = f(embeddings)
-#         print(pValues)
         probs.append(pValues.reshape(-1, 1))
         cluster_index = np.logical_and((pValues > p_threshold), (seediness_copy > 0))
-#         print(cluster_index)
         seediness_copy[cluster_index] = -1
         count += sum(cluster_index)
     if len(probs) == 0:
@@ -186,10 +184,43 @@ def fit_predict3(embeddings, seediness, margins, fitfunc, neighborhood=0.02, see
         f = fitfunc(centroids[i], extreme_margins[i])
         p = f(embeddings)
         probs.append(p.reshape(-1, 1))
+    if len(probs) < 1:
+        return np.ones(embeddings.shape[0]), 1
     probs = np.hstack(probs)
     pred_labels = np.argmax(probs, axis=1)
     pred_num_clusters = probs.shape[1]
     return pred_labels, pred_num_clusters
+
+
+def fit_predict_dbscan(embeddings, seediness, margins, fitfunc, seed_threshold=0.5, eps=0.001):
+    index = seediness > seed_threshold
+    center_candidates = embeddings[index]
+    margin_candidates = margins[index]
+    prediction = DBSCAN(eps=eps).fit_predict(center_candidates)
+    centroids = []
+    margins = []
+    spheres = []
+    for i in np.unique(prediction):
+        if i > 0:
+            cluster = prediction == i
+            cluster_centroid = np.mean(center_candidates[cluster], axis=0)
+            cluster_margin = np.mean(margin_candidates[cluster])
+            centroids.append(cluster_centroid)
+            margins.append(cluster_margin)
+    if len(centroids) == 0 or len(margins) == 0:
+        return np.ones(embeddings.shape[0]), [], 1
+    centroids = np.vstack(centroids)
+    margins = np.vstack(margins)
+    probs = []
+    for mu, sigma in zip(centroids, margins):
+        spheres.append((mu, sigma))
+        f = fitfunc(mu, sigma)
+        p = f(embeddings)
+        probs.append(p.reshape(-1, 1))
+    probs = np.hstack(probs)
+    pred_num_clusters = probs.shape[1]
+    pred_labels = np.argmax(probs, axis=1)
+    return pred_labels, spheres, pred_num_clusters
 
 
 def main_loop(train_cfg, **kwargs):
@@ -207,10 +238,10 @@ def main_loop(train_cfg, **kwargs):
 
     inference_cfg['trainval']['iterations'] = len(event_list)
     iterations = inference_cfg['trainval']['iterations']
-    s_threshold = kwargs['s_threshold']
-    p_threshold = kwargs['p_threshold']
-    # s_thresholds = {0: 0.88, 1: 0.92, 2: 0.84, 3: 0.84, 4: 0.8}
-    # p_thresholds = {0: 0.5, 1: 0.5, 2: 0.5, 3: 0.5, 4: 0.5}
+    # s_threshold = kwargs['s_threshold']
+    # p_threshold = kwargs['p_threshold']
+    s_thresholds = {0: 0.85, 1: 0.80, 2: 0.80, 3: 0.70, 4: 0.8}
+    p_thresholds = {0: 0.4, 1: 0.18, 2: 0.48, 3: 0.23, 4: 0.5}
 
     for i in event_list:
 
@@ -238,10 +269,14 @@ def main_loop(train_cfg, **kwargs):
             print(index, c)
             # pred, spheres, pred_num_clusters = fit_predict2(embedding_class, seed_class, margins_class, gaussian_kernel,
             #                     s_threshold=s_threshold, p_threshold=p_threshold, cluster_all=True)
-            pred, pred_num_clusters = fit_predict3(embedding_class, seed_class, margins_class, gaussian_kernel,
-                                seed_threshold=s_threshold, neighborhood=p_threshold)
-            # pred, spheres = fit_predict2(embedding_class, seed_class, margins_class, gaussian_kernel,
-            #                     s_threshold=s_thresholds[int(c)], p_threshold=p_thresholds[int(c)], cluster_all=True)
+            # pred, pred_num_clusters = fit_predict3(embedding_class, seed_class, margins_class, gaussian_kernel,
+            #                     seed_threshold=s_threshold, neighborhood=p_threshold)
+            # pred, _, pred_num_clusters = fit_predict_dbscan(embedding_class, seed_class, margins_class,
+            #     gaussian_kernel, seed_threshold=s_threshold, eps=p_threshold)
+            pred, spheres, pred_num_clusters = fit_predict2(embedding_class, seed_class,
+                                                            margins_class, gaussian_kernel,
+                                                            s_threshold=s_thresholds[int(c)],
+                                                            p_threshold=p_thresholds[int(c)], cluster_all=True)
             purity, efficiency = purity_efficiency(pred, clabels)
             fscore = 2 * (purity * efficiency) / (purity + efficiency)
             ari = ARI(pred, clabels)
@@ -272,16 +307,16 @@ if __name__ == "__main__":
     cfg = yaml.load(open(args['test_config'], 'r'), Loader=yaml.Loader)
 
     train_cfg = cfg['config_path']
-    s_thresholds = np.linspace(0, 0.95, 20)
-    p_thresholds = np.linspace(0.001, 0.1, 20)
-    for p in p_thresholds:
-        for t in s_thresholds:
-            start = time.time()
-            output = main_loop(train_cfg, s_threshold=t, p_threshold=p, **cfg)
-            end = time.time()
-            print("Time = {}".format(end - start))
-            name = '{}_{}_{}.csv'.format(cfg['name'], p, t)
-            if not os.path.exists(cfg['target']):
-                os.mkdir(cfg['target'])
-            target = os.path.join(cfg['target'], name)
-            output.to_csv(target, index=False, mode='a', chunksize=50)
+    # s_thresholds = np.linspace(0, 0.95, 20)
+    # p_thresholds = np.logspace(-3, -1, 20)
+    # for p in p_thresholds:
+    #     for t in s_thresholds:
+    start = time.time()
+    output = main_loop(train_cfg, **cfg)
+    end = time.time()
+    print("Time = {}".format(end - start))
+    name = '{}.csv'.format(cfg['name'])
+    if not os.path.exists(cfg['target']):
+        os.mkdir(cfg['target'])
+    target = os.path.join(cfg['target'], name)
+    output.to_csv(target, index=False, mode='a', chunksize=50)
