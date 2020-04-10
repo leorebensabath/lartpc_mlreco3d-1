@@ -22,6 +22,7 @@ class SpatialEmbeddings1(UResNet):
         self.seedDim = self.model_config.get('seediness_dim', 1)
         self.sigmaDim = self.model_config.get('sigma_dim', 1)
         self.seed_freeze = self.model_config.get('seed_freeze', False)
+        self.coordConv = self.model_config.get('coordConv', False)
         # Define Separate Sparse UResNet Decoder for seediness.
         self.decoding_block2 = scn.Sequential()
         self.decoding_conv2 = scn.Sequential()
@@ -58,6 +59,8 @@ class SpatialEmbeddings1(UResNet):
         self.tanhshrink = nn.Tanhshrink()
         self.sigmoid = nn.Sigmoid()
         self.softplus = nn.Softplus()
+
+        print(self)
 
 
     def seed_decoder(self, features_enc, deepest_layer):
@@ -99,6 +102,11 @@ class SpatialEmbeddings1(UResNet):
         features = point_cloud[:, self.dimension+1:].float()
         features = features[:, -1].view(-1, 1)
 
+        normalized_coords = (coords[:, :3] - float(self.spatial_size) / 2) \
+                    / (float(self.spatial_size) / 2)
+        if self.coordConv:
+            features = torch.cat([normalized_coords, features], dim=1)
+
         x = self.input((coords, features))
         encoder_res = self.encoder(x)
         features_enc = encoder_res['features_enc']
@@ -108,7 +116,7 @@ class SpatialEmbeddings1(UResNet):
 
         embeddings = self.outputEmbeddings(features_cluster[-1])
         embeddings[:, :self.dimension] = self.tanh(embeddings[:, :self.dimension])
-        embeddings[:, :self.dimension] += coords[:, :self.dimension] / self.spatial_size
+        embeddings[:, :self.dimension] += normalized_coords
         sigma = 2 * self.sigmoid(embeddings[:, self.dimension:self.dimension+3])
         l = 2 * self.tanh(embeddings[:, self.dimension+3:])
         margins = torch.cat([sigma, l], dim=1)
