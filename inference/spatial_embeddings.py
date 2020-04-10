@@ -208,10 +208,12 @@ def main_loop(train_cfg, **kwargs):
 
     inference_cfg['trainval']['iterations'] = len(event_list)
     iterations = inference_cfg['trainval']['iterations']
-    s_threshold = kwargs['s_threshold']
-    p_threshold = kwargs['p_threshold']
-    s_thresholds = {0: 0.88, 1: 0.92, 2: 0.84, 3: 0.84, 4: 0.8}
-    p_thresholds = {0: 0.5, 1: 0.5, 2: 0.5, 3: 0.5, 4: 0.5}
+    # s_threshold = kwargs['s_threshold']
+    # p_threshold = kwargs['p_threshold']
+    # s_thresholds = {0: 0.88, 1: 0.92, 2: 0.84, 3: 0.84, 4: 0.8}
+    # p_thresholds = {0: 0.5, 1: 0.5, 2: 0.5, 3: 0.5, 4: 0.5}
+    s_thresholds = {0: 0.85, 1: 0.80, 2: 0.80, 3: 0.70, 4: 0.8}
+    p_thresholds = {0: 0.4, 1: 0.18, 2: 0.48, 3: 0.23, 4: 0.5}
     # s_thresholds = { key : s_threshold for key in range(5)}
     # p_thresholds = { key : p_threshold for key in range(5)}
 
@@ -274,14 +276,14 @@ if __name__ == "__main__":
 
     train_cfg = cfg['config_path']
 
-    for p in p_thresholds:
-        for t in s_thresholds:
-            start = time.time()
-            output = main_loop(train_cfg, *cfg)
-            end = time.time()
-            print("Time = {}".format(end - start))
-            name = '{}_{}_{}.csv'.format(cfg['name'], p, t)
-            if not os.path.exists(cfg['target']):
-                os.mkdir(cfg['target'])
-            target = os.path.join(cfg['target'], name)
-            output.to_csv(target, index=False, mode='a', chunksize=50)
+    # for p in p_thresholds:
+    #     for t in s_thresholds:
+    start = time.time()
+    output = main_loop(train_cfg, **cfg)
+    end = time.time()
+    print("Time = {}".format(end - start))
+    name = '{}.csv'.format(cfg['name'])
+    if not os.path.exists(cfg['target']):
+        os.mkdir(cfg['target'])
+    target = os.path.join(cfg['target'], name)
+    output.to_csv(target, index=False, mode='a', chunksize=50)
