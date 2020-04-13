@@ -12,6 +12,7 @@ from .cluster_cnn import clustering_loss_construct
 from mlreco.models.cluster_node_gnn import NodeChannelLoss
 from mlreco.models.cluster_gnn import EdgeChannelLoss
 from mlreco.models.gnn.losses.grouping import *
+from mlreco.models.chain.full_cnn import FullCNN
 
 from pprint import pprint
 
