@@ -53,14 +53,12 @@ class ClusteringLoss(nn.Module):
         self.loss_func = clustering_loss_construct(self.loss_func_name)
         self.loss_func = self.loss_func(self.loss_config)
 
-    def forward(self, result, input_data, segment_label):
-        data = input_data[0]
+    def forward(self, result, segment_label, group_label):
+        data = group_label[0]
         coords = data[:, :4]
         fragment_label = data[:, -2]
         cluster_label = [torch.cat([coords, fragment_label.view(-1, 1)], dim=1)]
         # print(result)
-        # print(cluster_label)
-        # print(segment_label)
         return self.loss_func(result, segment_label, cluster_label)
 
 # class ClusteringLoss1(MaskBCELoss2):
