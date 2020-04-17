@@ -167,6 +167,7 @@ def fit_predict2(embeddings, seediness, margins, fitfunc,
         cluster_index = np.logical_and((pValues > p_threshold), (seediness_copy > 0))
         seediness_copy[cluster_index] = -1
         count += sum(cluster_index)
+        # print(count)
     if len(probs) == 0:
         return pred_labels, spheres, 1
     probs = np.hstack(probs)
@@ -226,7 +227,7 @@ def fit_predict_dbscan(embeddings, seediness, margins, fitfunc, seed_threshold=0
 def main_loop(train_cfg, **kwargs):
 
     inference_cfg = make_inference_cfg(train_cfg, gpu=kwargs['gpu'], batch_size=1,
-                        model_path=kwargs['model_path'], snapshot=25999)
+                        model_path=kwargs['model_path'])
     start_index = kwargs.get('start_index', 0)
     end_index = kwargs.get('end_index', 20000)
     event_list = list(range(start_index, end_index))
@@ -238,10 +239,10 @@ def main_loop(train_cfg, **kwargs):
 
     inference_cfg['trainval']['iterations'] = len(event_list)
     iterations = inference_cfg['trainval']['iterations']
-    # s_threshold = kwargs['s_threshold']
-    # p_threshold = kwargs['p_threshold']
-    s_thresholds = {0: 0.85, 1: 0.80, 2: 0.80, 3: 0.70, 4: 0.8}
-    p_thresholds = {0: 0.4, 1: 0.18, 2: 0.48, 3: 0.23, 4: 0.5}
+    s_threshold = kwargs['s_threshold']
+    p_threshold = kwargs['p_threshold']
+    # s_thresholds = {0: 0.85, 1: 0.80, 2: 0.80, 3: 0.70, 4: 0.8}
+    # p_thresholds = {0: 0.4, 1: 0.18, 2: 0.48, 3: 0.23, 4: 0.5}
 
     for i in event_list:
 
@@ -254,6 +255,7 @@ def main_loop(train_cfg, **kwargs):
         margins = res['margins'][0].reshape(-1, )
         semantic_labels = data_blob['segment_label'][0][:, 4]
         cluster_labels = data_blob['input_data'][0][:, 4]
+        print(cluster_labels)
         coords = data_blob['input_data'][0][:, :3]
         index = data_blob['index'][0]
 
@@ -273,13 +275,16 @@ def main_loop(train_cfg, **kwargs):
             #                     seed_threshold=s_threshold, neighborhood=p_threshold)
             # pred, _, pred_num_clusters = fit_predict_dbscan(embedding_class, seed_class, margins_class,
             #     gaussian_kernel, seed_threshold=s_threshold, eps=p_threshold)
+            print('Seed Threshold: {}, P Threshold: {}'.format(s_threshold, p_threshold))
             pred, spheres, pred_num_clusters = fit_predict2(embedding_class, seed_class,
                                                             margins_class, gaussian_kernel,
-                                                            s_threshold=s_thresholds[int(c)],
-                                                            p_threshold=p_thresholds[int(c)], cluster_all=True)
+                                                            s_threshold=s_threshold,
+                                                            p_threshold=p_threshold, cluster_all=True)
+
             purity, efficiency = purity_efficiency(pred, clabels)
             fscore = 2 * (purity * efficiency) / (purity + efficiency)
             ari = ARI(pred, clabels)
+            print("ARI = ", ari)
             sbd = SBD(pred, clabels)
             nclusters = len(np.unique(clabels))
             _, true_centroids = find_cluster_means(coords_class, clabels)
@@ -289,7 +294,6 @@ def main_loop(train_cfg, **kwargs):
                 row = (index, c, ari, purity, efficiency, fscore, sbd, \
                     nclusters, pred_num_clusters, margin, true_size)
                 output.append(row)
-            print("ARI = ", ari)
 
     output = pd.DataFrame(output, columns=['Index', 'Class', 'ARI',
                 'Purity', 'Efficiency', 'FScore', 'SBD', 'num_clusters',
@@ -307,16 +311,16 @@ if __name__ == "__main__":
     cfg = yaml.load(open(args['test_config'], 'r'), Loader=yaml.Loader)
 
     train_cfg = cfg['config_path']
-    # s_thresholds = np.linspace(0, 0.95, 20)
-    # p_thresholds = np.logspace(-3, -1, 20)
-    # for p in p_thresholds:
-    #     for t in s_thresholds:
-    start = time.time()
-    output = main_loop(train_cfg, **cfg)
-    end = time.time()
-    print("Time = {}".format(end - start))
-    name = '{}.csv'.format(cfg['name'])
-    if not os.path.exists(cfg['target']):
-        os.mkdir(cfg['target'])
-    target = os.path.join(cfg['target'], name)
-    output.to_csv(target, index=False, mode='a', chunksize=50)
+    s_thresholds = np.linspace(0, 0.95, 20)
+    p_thresholds = np.linspace(0.05, 0.95, 20)
+    for p in p_thresholds:
+        for t in s_thresholds:
+            start = time.time()
+            output = main_loop(train_cfg, s_threshold=t, p_threshold=p, **cfg)
+            end = time.time()
+            print("Time = {}".format(end - start))
+            name = '{}_{}_{}.csv'.format(cfg['name'], p, t)
+            if not os.path.exists(cfg['target']):
+                os.mkdir(cfg['target'])
+            target = os.path.join(cfg['target'], name)
+            output.to_csv(target, index=False, mode='a', chunksize=50)
