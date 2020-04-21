@@ -192,12 +192,12 @@ def main_loop(train_cfg, **kwargs):
 
     inference_cfg['trainval']['iterations'] = len(event_list)
     iterations = inference_cfg['trainval']['iterations']
-    s_threshold = kwargs['s_threshold']
-    p_threshold = kwargs['p_threshold']
+    # s_threshold = kwargs['s_threshold']
+    # p_threshold = kwargs['p_threshold']
     # s_thresholds = {0: 0.88, 1: 0.92, 2: 0.84, 3: 0.84, 4: 0.8}
     # p_thresholds = {0: 0.5, 1: 0.5, 2: 0.5, 3: 0.5, 4: 0.5}
-    # s_thresholds = {0: 0.85, 1: 0.80, 2: 0.80, 3: 0.70, 4: 0.8}
-    # p_thresholds = {0: 0.4, 1: 0.18, 2: 0.48, 3: 0.23, 4: 0.5}
+    s_thresholds = {0: 0.65, 1: 0.95, 2: 0.25, 3: 0.85, 4: 0.0} # F32D6 Parameters
+    p_thresholds = {0: 0.31, 1: 0.21, 2: 0.06, 3: 0.26, 4: 0.11}
     # s_thresholds = { key : s_threshold for key in range(5)}
     # p_thresholds = { key : p_threshold for key in range(5)}
 
@@ -227,10 +227,10 @@ def main_loop(train_cfg, **kwargs):
             seed_class = seediness[semantic_mask]
             margins_class = margins[semantic_mask]
             print(index, c)
-            # pred, spheres, cluster_count = fit_predict2(embedding_class, seed_class, margins_class, gaussian_kernel,
-            #                     s_threshold=s_thresholds[int(c)], p_threshold=p_thresholds[int(c)], cluster_all=True)
             pred, spheres, cluster_count = fit_predict2(embedding_class, seed_class, margins_class, gaussian_kernel,
-                                s_threshold=s_threshold, p_threshold=p_threshold, cluster_all=True)
+                                s_threshold=s_thresholds[int(c)], p_threshold=p_thresholds[int(c)], cluster_all=True)
+            # pred, spheres, cluster_count = fit_predict2(embedding_class, seed_class, margins_class, gaussian_kernel,
+            #                     s_threshold=s_threshold, p_threshold=p_threshold, cluster_all=True)
             purity, efficiency = purity_efficiency(pred, clabels)
             fscore = 2 * (purity * efficiency) / (purity + efficiency)
             ari = ARI(pred, clabels)
@@ -262,17 +262,17 @@ if __name__ == "__main__":
 
     train_cfg = cfg['config_path']
 
-    p_thresholds = np.linspace(0.01, 0.95, 20)
-    s_thresholds = np.linspace(0, 0.95, 20)
-
-    for p in p_thresholds:
-        for t in s_thresholds:
-            start = time.time()
-            output = main_loop(train_cfg, **cfg, s_threshold=t, p_threshold=p)
-            end = time.time()
-            print("Time = {}".format(end - start))
-            name = '{}_{}_{}.csv'.format(cfg['name'], p, t)
-            if not os.path.exists(cfg['target']):
-                os.mkdir(cfg['target'])
-            target = os.path.join(cfg['target'], name)
-            output.to_csv(target, index=False, mode='a', chunksize=50)
+    # p_thresholds = np.linspace(0.01, 0.95, 20)
+    # s_thresholds = np.linspace(0, 0.95, 20)
+    #
+    # for p in p_thresholds:
+    #     for t in s_thresholds:
+    start = time.time()
+    output = main_loop(train_cfg, **cfg)
+    end = time.time()
+    print("Time = {}".format(end - start))
+    name = '{}_updated.csv'.format(cfg['name'])
+    if not os.path.exists(cfg['target']):
+        os.mkdir(cfg['target'])
+    target = os.path.join(cfg['target'], name)
+    output.to_csv(target, index=False, mode='a', chunksize=50)
