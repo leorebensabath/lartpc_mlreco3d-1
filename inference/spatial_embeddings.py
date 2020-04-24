@@ -168,13 +168,14 @@ def fit_predict2(embeddings, seediness, margins, fitfunc,
         seediness_copy[cluster_index] = -1
         count += sum(cluster_index)
     if len(probs) == 0:
-        return pred_labels, spheres, 1
+        return pred_labels, spheres, 1, float('inf')
     cluster_count = len(probs)
     probs = np.hstack(probs)
     pred_labels = np.argmax(probs, axis=1)
+    ll = np.sum(np.log(np.max(probs, axis=1) + 1e-8))
     # if cluster_all:
     #     pred_labels = cluster_remainder(embeddings, pred_labels)
-    return pred_labels, spheres, cluster_count
+    return pred_labels, spheres, cluster_count, ll
 
 
 def main_loop(train_cfg, **kwargs):
@@ -205,7 +206,10 @@ def main_loop(train_cfg, **kwargs):
 
         print("Iteration: %d" % i)
 
+        start = time.time()
         data_blob, res = Trainer.forward(dataset)
+        end = time.time()
+        forward_time = float(end - start)
         # segmentation = res['segmentation'][0]
         embedding = res['embeddings'][0]
         seediness = res['seediness'][0].reshape(-1, )
@@ -227,8 +231,11 @@ def main_loop(train_cfg, **kwargs):
             seed_class = seediness[semantic_mask]
             margins_class = margins[semantic_mask]
             print(index, c)
-            pred, spheres, cluster_count = fit_predict2(embedding_class, seed_class, margins_class, gaussian_kernel,
+            start = time.time()
+            pred, spheres, cluster_count, ll = fit_predict2(embedding_class, seed_class, margins_class, gaussian_kernel,
                                 s_threshold=s_thresholds[int(c)], p_threshold=p_thresholds[int(c)], cluster_all=True)
+            end = time.time()
+            post_time = float(end-start)
             # pred, spheres, cluster_count = fit_predict2(embedding_class, seed_class, margins_class, gaussian_kernel,
             #                     s_threshold=s_threshold, p_threshold=p_threshold, cluster_all=True)
             purity, efficiency = purity_efficiency(pred, clabels)
@@ -241,13 +248,15 @@ def main_loop(train_cfg, **kwargs):
                 margin = np.mean(margins_class[clabels == cluster_id])
                 true_size = np.std(np.linalg.norm(coords_class[clabels == cluster_id] - true_centroids[j], axis=1))
                 row = (index, c, ari, purity, efficiency, fscore, sbd, \
-                    true_num_clusters, cluster_count, s_thresholds[int(c)], p_thresholds[int(c)], margin, true_size)
+                    true_num_clusters, cluster_count, s_thresholds[int(c)], p_thresholds[int(c)],
+                    margin, true_size, forward_time, post_time, ll)
                 output.append(row)
             print("ARI = ", ari)
+            print("LL = ", ll)
 
     output = pd.DataFrame(output, columns=['Index', 'Class', 'ARI',
                 'Purity', 'Efficiency', 'FScore', 'SBD', 'true_num_clusters', 'pred_num_clusters',
-                'seed_threshold', 'prob_threshold', 'margin', 'true_size'])
+                'seed_threshold', 'prob_threshold', 'margin', 'true_size', 'forward_time', 'post_time', 'll'])
     return output
 
 

@@ -55,7 +55,8 @@ def clustering_loss_dict():
         'se_ce_lovasz': spatial_embeddings.CELovaszLoss,
         'se_offset_lovasz': spatial_embeddings.OffsetLovasz,
         'se_multi_layer_1': spherical_embeddings.MaskEmbeddingLoss,
-        'se_multi_layer_2': spherical_embeddings.MaskEmbeddingLoss2
+        'se_multi_layer_2': spherical_embeddings.MaskEmbeddingLoss2,
+        'se_lovasz_inter_entropy': spatial_embeddings.MaskLovaszInterEntropy
         # 'se_multi_layer': spatial_embeddings.MultiLayerLovasz
     }
     return loss

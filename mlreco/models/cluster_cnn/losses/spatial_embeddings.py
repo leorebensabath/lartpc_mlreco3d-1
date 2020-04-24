@@ -453,6 +453,52 @@ class MaskLovaszInterLoss(MaskLovaszHingeLoss):
         return loss, accuracy
 
 
+class MaskLovaszInterEntropy(MaskLovaszInterLoss):
+
+    def __init__(self, cfg, name='clustering_loss'):
+        super(MaskLovaszInterEntropy, self).__init__(cfg)
+        self.inter_weight = self.loss_config.get('inter_weight', 1.0)
+        self.norm = 2
+
+    def get_per_class_probabilities(self, embeddings, margins, labels, coords):
+        '''
+        Computes binary foreground/background loss.
+        '''
+        loss = 0.0
+        smoothing_loss = 0.0
+        centroids = self.find_cluster_means(embeddings, labels)
+        inter_loss = self.inter_cluster_loss(centroids)
+        # reg_loss = self.regularization(centroids)
+        n_clusters = len(centroids)
+        cluster_labels = labels.unique(sorted=True)
+        probs = torch.zeros(embeddings.shape[0]).float().cuda()
+        accuracy = 0.0
+
+        for i, c in enumerate(cluster_labels):
+            index = (labels == c)
+            mask = torch.zeros(embeddings.shape[0]).cuda()
+            mask[index] = 1
+            mask[~index] = 0
+            sigma = torch.mean(margins[index], dim=0)
+            dists = torch.sum(torch.pow(embeddings - centroids[i], 2), dim=1)
+            p = torch.exp(-dists / (2 * torch.pow(sigma, 2) + 1e-6))
+            probs[index] = p[index]
+            loss += lovasz_hinge_flat(2 * p - 1, mask)
+            accuracy += iou_binary(p > 0.5, mask, per_image=False)
+            sigma_detach = sigma.detach()
+            smoothing_loss += torch.mean(torch.norm(margins[index] - sigma_detach, dim=1))
+
+        entropy_loss = torch.mean(torch.log(margins + 1e-8))
+        loss /= n_clusters
+        smoothing_loss /= n_clusters
+        accuracy /= n_clusters
+        loss += inter_loss
+        loss += entropy_loss
+        # loss += reg_loss / n_clusters
+
+        return loss, smoothing_loss, inter_loss, probs, accuracy
+
+
 class CEDiceLoss(MaskBCELoss2):
 
     def __init__(self, cfg, name='clustering_loss'):
