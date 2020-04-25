@@ -6,6 +6,15 @@ from .lovasz import StableBCELoss
 
 # Collection of Miscellaneous Loss Functions not yet implemented in Pytorch.
 
+def bc_distance(mu1, mu2, sigma1, sigma2, eps=1e-8):
+
+    s1 = sigma1 + eps
+    s2 = sigma2 + eps
+
+    d = 0.25 * torch.log(0.25 * (torch.pow(s1 / s2, 2) + torch.pow(s2 / s1, 2) + 2)) \
+        + 0.25 * torch.norm(mu1 - mu2)**2 / (s1**2 + s2**2) 
+    return torch.exp(-d)
+
 class FocalLoss(nn.Module):
     '''
     Original Paper: https://arxiv.org/abs/1708.02002

@@ -6,7 +6,7 @@ import numpy as np
 import sparseconvnet as scn
 
 from .lovasz import mean, lovasz_hinge_flat, StableBCELoss, iou_binary
-from .misc import FocalLoss, WeightedFocalLoss
+from .misc import FocalLoss, WeightedFocalLoss, bc_distance
 from collections import defaultdict
 import pprint
 
@@ -479,6 +479,78 @@ class MaskLovaszInterLoss(MaskLovaszHingeLoss):
             accuracy['accuracy_{}'.format(int(sc))] = acc
 
         return loss, accuracy
+        
+
+
+class MaskBCDistLoss(MaskLovaszInterLoss):
+
+    def __init__(self, cfg, name='clustering_loss'):
+        super(MaskBCDistLoss, self).__init__(cfg)
+        self.inter_weight = self.loss_config.get('inter_weight', 1.0)
+        self.norm = 2
+
+    def inter_cluster_loss(self, cluster_means, margins):
+        '''
+        Implementation of distance loss in Discriminative Loss.
+        Inputs:
+            cluster_means (torch.Tensor): output from find_cluster_means
+            margin (float/int): the magnitude of the margin delta_d in the paper.
+            Think of it as the distance between each separate clusters in
+            embedding space.
+        Returns:
+            inter_loss (float): computed cross-centroid distance loss (see paper).
+            Factor of 2 is included for proper normalization.
+        '''
+        inter_loss = 0.0
+        n_clusters = len(cluster_means)
+        if n_clusters < 2:
+            # Inter-cluster loss is zero if there only one instance exists for
+            # a semantic label.
+            return 0.0
+        else:
+            for i, mu1 in enumerate(cluster_means):
+                for j, mu2 in enumerate(cluster_means):
+                    if i != j:
+                        inter_loss += bc_distance(mu1, mu2, margins[i], margins[j])
+            inter_loss /= float((n_clusters - 1) * n_clusters)
+            return inter_loss.mean()
+
+
+    def get_per_class_probabilities(self, embeddings, margins, labels, coords):
+        '''
+        Computes binary foreground/background loss.
+        '''
+        loss = 0.0
+        smoothing_loss = 0.0
+        centroids = self.find_cluster_means(embeddings, labels)
+        margins_mean = self.find_cluster_means(margins, labels)
+        inter_loss = self.inter_cluster_loss(centroids, margins_mean)
+        # print(inter_loss)
+        n_clusters = len(centroids)
+        cluster_labels = labels.unique(sorted=True)
+        probs = torch.zeros(embeddings.shape[0]).float().cuda()
+        accuracy = 0.0
+
+        for i, c in enumerate(cluster_labels):
+            index = (labels == c)
+            mask = torch.zeros(embeddings.shape[0]).cuda()
+            mask[index] = 1
+            mask[~index] = 0
+            sigma = torch.mean(margins[index], dim=0)
+            dists = torch.sum(torch.pow(embeddings - centroids[i], 2), dim=1)
+            p = torch.exp(-dists / (2 * torch.pow(sigma, 2)))
+            probs[index] = p[index]
+            loss += lovasz_hinge_flat(2 * p - 1, mask)
+            accuracy += iou_binary(p > 0.5, mask, per_image=False)
+            sigma_detach = sigma.detach()
+            smoothing_loss += torch.mean(torch.norm(margins[index] - sigma_detach, dim=1))
+
+        loss /= n_clusters
+        smoothing_loss /= n_clusters
+        accuracy /= n_clusters
+        loss += inter_loss
+
+        return loss, smoothing_loss, inter_loss, probs, accuracy
 
 
 class CELovaszLoss(MaskBCELoss2):
