@@ -55,6 +55,29 @@ class NetworkBase(nn.Module):
                 .add(scn.SubmanifoldConvolution(self.dimension, b, b, 3, self.allow_bias)))
         ).add(scn.AddTable())
 
+    def _resnet_autoencoder_block(self, module, a, b):
+        '''
+        Utility Method for attaching ResNet-Style Blocks.
+
+        INPUTS:
+            - module (scn Module): network module to attach ResNet block.
+            - a (int): number of input feature dimension
+            - b (int): number of output feature dimension
+
+        RETURNS:
+            None (operation is in-place)
+        '''
+        module.add(scn.ConcatTable()
+            .add(scn.Identity() if a == b else scn.NetworkInNetwork(a, b, self.allow_bias))
+            .add(scn.Sequential()
+                .add(scn.BatchNormLeakyReLU(a, leakiness=self.leakiness))
+                .add(scn.SubmanifoldConvolution(self.dimension, a, b, 3, self.allow_bias))
+                .add(scn.BatchNormLeakyReLU(b, leakiness=self.leakiness))
+                .add(scn.SubmanifoldConvolution(self.dimension, b, b, 3, self.allow_bias)))
+        ).add(scn.AddTable()).add(
+            scn.Sparsify(self.dimension, b)
+        )
+
 
     def _resnet_block_general(self, norm_layer):
         '''
