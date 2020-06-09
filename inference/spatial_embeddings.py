@@ -116,7 +116,9 @@ def fit_predict2(embeddings, seediness, margins, fitfunc,
     spheres = []
     seediness_copy = np.copy(seediness)
     count = 0
+    print(seediness.shape[0])
     while count < seediness.shape[0]:
+        print(count)
         i = np.argsort(seediness_copy)[::-1][0]
         seedScore = seediness[i]
         if seedScore < s_threshold:
@@ -130,6 +132,8 @@ def fit_predict2(embeddings, seediness, margins, fitfunc,
         cluster_index = np.logical_and((pValues > p_threshold), (seediness_copy > 0))
         # print(cluster_index)
         seediness_copy[cluster_index] = -1
+        if sum(cluster_index) == 0:
+            break
         count += sum(cluster_index)
     if len(probs) == 0:
         return pred_labels, spheres, 1, float('inf')
