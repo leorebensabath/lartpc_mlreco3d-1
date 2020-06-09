@@ -116,9 +116,9 @@ def fit_predict2(embeddings, seediness, margins, fitfunc,
     spheres = []
     seediness_copy = np.copy(seediness)
     count = 0
-    print(seediness.shape[0])
+    # print(seediness.shape[0])
     while count < seediness.shape[0]:
-        print(count)
+        # print(count)
         i = np.argsort(seediness_copy)[::-1][0]
         seedScore = seediness[i]
         if seedScore < s_threshold:
@@ -246,8 +246,8 @@ def main_loop(train_cfg, **kwargs):
 
     inference_cfg['trainval']['iterations'] = len(event_list)
     iterations = inference_cfg['trainval']['iterations']
-    # s_threshold = kwargs['s_threshold']
-    # p_threshold = kwargs['p_threshold']
+    s_thresholds = kwargs['s_thresholds']
+    p_thresholds = kwargs['p_thresholds']
     # s_thresholds = {0: 0.88, 1: 0.92, 2: 0.84, 3: 0.84, 4: 0.8}
     # p_thresholds = {0: 0.5, 1: 0.5, 2: 0.5, 3: 0.5, 4: 0.5}
     # s_thresholds = {0: 0.65, 1: 0.95, 2: 0.25, 3: 0.85, 4: 0.0} # F32D6 Parameters
@@ -305,7 +305,8 @@ def main_loop(train_cfg, **kwargs):
                     margin, true_size, forward_time, post_time, ll)
                 output.append(row)
             print("ARI = ", ari)
-            print("LL = ", ll)
+            print("SBD = ", sbd)
+            # print("LL = ", ll)
 
     output = pd.DataFrame(output, columns=['Index', 'Class', 'ARI',
                 'Purity', 'Efficiency', 'FScore', 'SBD', 'true_num_clusters', 'pred_num_clusters',
@@ -337,7 +338,7 @@ if __name__ == "__main__":
         output = main_loop(train_cfg, **cfg)
     end = time.time()
     print("Time = {}".format(end - start))
-    name = '{}_updated.csv'.format(cfg['name'])
+    name = '{}.csv'.format(cfg['name'])
     if not os.path.exists(cfg['target']):
         os.mkdir(cfg['target'])
     target = os.path.join(cfg['target'], name)
