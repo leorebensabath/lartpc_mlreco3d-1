@@ -317,6 +317,7 @@ class MaskLovaszInterLoss(MaskLovaszHingeLoss):
         super(MaskLovaszInterLoss, self).__init__(cfg)
         self.inter_weight = self.loss_config.get('inter_weight', 1.0)
         self.norm = 2
+        self.regularize_margins = self.loss_config.get('reg_margins', True)
 
 
     def regularization(self, cluster_means):
@@ -377,6 +378,7 @@ class MaskLovaszInterLoss(MaskLovaszHingeLoss):
         cluster_labels = labels.unique(sorted=True)
         probs = torch.zeros(embeddings.shape[0]).float().cuda()
         accuracy = 0.0
+        sigmas = []
 
         for i, c in enumerate(cluster_labels):
             index = (labels == c)
@@ -384,6 +386,7 @@ class MaskLovaszInterLoss(MaskLovaszHingeLoss):
             mask[index] = 1
             mask[~index] = 0
             sigma = torch.mean(margins[index], dim=0)
+            sigmas.append(sigma)
             dists = torch.sum(torch.pow(embeddings - centroids[i], 2), dim=1)
             p = torch.exp(-dists / (2 * torch.pow(sigma, 2) + 1e-6))
             probs[index] = p[index]
@@ -396,6 +399,7 @@ class MaskLovaszInterLoss(MaskLovaszHingeLoss):
         smoothing_loss /= n_clusters
         accuracy /= n_clusters
         loss += inter_loss
+        loss += torch.mean(margins)
         # loss += reg_loss / n_clusters
 
         return loss, smoothing_loss, inter_loss, probs, accuracy

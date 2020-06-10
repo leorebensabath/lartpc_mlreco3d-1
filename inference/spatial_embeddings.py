@@ -283,6 +283,7 @@ def main_loop(train_cfg, **kwargs):
             coords_class = coords[semantic_mask]
             seed_class = seediness[semantic_mask]
             margins_class = margins[semantic_mask]
+            voxel_count = clabels.shape[0]
             print(index, c)
             start = time.time()
             pred, spheres, cluster_count, ll = fit_predict2(embedding_class, seed_class, margins_class, gaussian_kernel,
@@ -302,7 +303,7 @@ def main_loop(train_cfg, **kwargs):
                 true_size = np.std(np.linalg.norm(coords_class[clabels == cluster_id] - true_centroids[j], axis=1))
                 row = (index, c, ari, purity, efficiency, fscore, sbd, \
                     true_num_clusters, cluster_count, s_thresholds[int(c)], p_thresholds[int(c)],
-                    margin, true_size, forward_time, post_time, ll)
+                    margin, true_size, forward_time, post_time, voxel_count)
                 output.append(row)
             print("ARI = ", ari)
             print("SBD = ", sbd)
@@ -310,7 +311,7 @@ def main_loop(train_cfg, **kwargs):
 
     output = pd.DataFrame(output, columns=['Index', 'Class', 'ARI',
                 'Purity', 'Efficiency', 'FScore', 'SBD', 'true_num_clusters', 'pred_num_clusters',
-                'seed_threshold', 'prob_threshold', 'margin', 'true_size', 'forward_time', 'post_time', 'll'])
+                'seed_threshold', 'prob_threshold', 'margin', 'true_size', 'forward_time', 'post_time', 'voxel_count'])
     return output
 
 
