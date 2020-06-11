@@ -184,7 +184,7 @@ def main_loop2(train_cfg, **kwargs):
         # print(data_blob['segment_label'][0])
         # print(data_blob['cluster_label'][0])
         semantic_labels = data_blob['segment_label'][0][:, -1]
-        cluster_labels = data_blob['cluster_label'][0][:, -2]
+        cluster_labels = data_blob['cluster_label'][0][:, -1]
         coords = data_blob['input_data'][0][:, :3]
         index = data_blob['index'][0]
 
