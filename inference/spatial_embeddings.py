@@ -372,7 +372,7 @@ def main_loop3(train_cfg, **kwargs):
             voxel_mask = np.ones(clabels.shape[0]).astype(bool)
             for j, cluster_id in enumerate(np.unique(clabels)):
                 if sum(clabels == cluster_id) < 10:
-                    voxel_mask = np.logical_and(voxel_mask, ~(clabels == cluster_id))
+                    voxel_mask[]
             if sum(voxel_mask) < 10:
                 continue
             start = time.time()
@@ -404,8 +404,6 @@ def main_loop3(train_cfg, **kwargs):
                 'Purity', 'Efficiency', 'FScore', 'SBD', 'true_num_clusters', 'pred_num_clusters',
                 'seed_threshold', 'prob_threshold', 'margin', 'true_size', 'forward_time', 'post_time', 'voxel_count'])
     return output
-
-
 
 
 if __name__ == "__main__":
