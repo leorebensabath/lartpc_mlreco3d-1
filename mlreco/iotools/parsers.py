@@ -8,10 +8,21 @@ from mlreco.utils.dbscan import dbscan_types
 from mlreco.utils.groups import filter_duplicate_voxels, filter_duplicate_voxels_ref, filter_nonimg_voxels
 
 def parse_particle_singlep_pdg(data):
+    TYPE_LABELS = {
+        22: 0,  # photon
+        11: 1,  # e-
+        -11: 1, # e+
+        13: 2,  # mu-
+        -13: 2, # mu+
+        211: 3, # pi+
+        -211: 3, # pi-
+        2212: 4, # protons
+    }
     parts = data[0]
     for p in parts.as_vector():
         if not p.track_id() == 1: continue
-        return p.pdg_code()
+        return TYPE_LABELS[int(p.pdg_code())]
+    return -1
 
 def parse_sparse2d_meta(data):
     event_tensor2d = data[0]

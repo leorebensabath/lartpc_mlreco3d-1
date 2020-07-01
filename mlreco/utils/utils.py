@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 import numpy as np
 import torch
-import sparseconvnet as scn
+# import sparseconvnet as scn
 import time
 
 # inter-cluster distance calculation: define dumb matrix (vectorized) dist calculation + jit it
@@ -21,8 +21,8 @@ def to_numpy(s):
         return s
     if isinstance(s, torch.Tensor):
         return s.cpu().detach().numpy()
-    elif isinstance(s, scn.SparseConvNetTensor):
-        return torch.cat([s.get_spatial_locations().float(), s.features.cpu()], dim=1).detach().numpy()
+    # elif isinstance(s, scn.SparseConvNetTensor):
+    #     return torch.cat([s.get_spatial_locations().float(), s.features.cpu()], dim=1).detach().numpy()
     else:
         raise TypeError("Unknown return type %s" % type(s))
 
